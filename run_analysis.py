@@ -2,26 +2,23 @@
 """
 VDJ recombination / SARP-score geographic bias analysis.
 
-Pipeline:
+Pipeline (all steps use real, publicly sourced data - see README.md):
   1. Real SARP-seq RSS activity scores (Hoolehan et al. 2022, NAR) - downloaded
      live from Europe PMC's mirror of the paper's supplementary data.
-  2. Real per-D-gene, per-superpopulation allele frequencies from KIARVA
-     (Corcoran et al. 2026, Immunity - 2486 individuals, 1000 Genomes).
-  3. Real per-individual D-gene RSS sequences (heptamer/spacer/nonamer, both
-     flanks) from VDJbase's genomic API (Rodriguez et al. 2023, Nat Commun,
-     IGenotyper long-read assemblies, ~102 subjects) - used to build an
-     allele -> RSS lookup table.
-  4. 410-person pseudo-cohorts per continental group (Africa/Asia/Europe),
-     Hardy-Weinberg-simulated from step 2's real frequencies, tagged with
-     step 3's real RSS sequences, scored with step 1's real SARP scores.
+  2. Real per-individual IGHD genotype calls for 2486 people from the 1000
+     Genomes Project, downloaded live from KIARVA's own official production
+     data file (github.com/ScilifelabDataCentre/kiarva-backend).
+  3. A real per-allele RSS (heptamer+spacer) lookup table, built by locating
+     each allele's known D-REGION core sequence inside the longer,
+     flank-extended read variants present in that same genotype file (falls
+     back to VDJbase's ~102-subject long-read dataset for any allele that
+     file doesn't cover with a flank-extended read).
+  4. 410-person cohorts per continental group (Africa/Asia/Europe), sampled
+     from the REAL 2486 individuals, stratified to preserve each
+     subpopulation's real share within its superpopulation.
   5. Kruskal-Wallis (3-group omnibus) + pairwise Mann-Whitney (BH-corrected)
      per D gene, for both the 5' (V-proximal) and 3' (J-proximal, "J tarafi")
      RSS.
-
-See README.md for why step 4 simulates instead of using raw named
-individuals: no public database currently exposes personally-sequenced D-RSS
-for anywhere near 410 people per continent (see README's "Data provenance"
-section for the numbers actually available).
 
 Usage:
     python run_analysis.py [--n-per-group 410] [--genes IGHD3-10 IGHD4-17 ...]
@@ -35,10 +32,21 @@ from pathlib import Path
 import pandas as pd
 
 from vdj_bias.analysis import format_report_line, group_means, run_statistics, score_cohorts
-from vdj_bias.kiarva_client import KiarvaClient
+from vdj_bias.kiarva_genotypes import GROUP_TO_SUPERPOPS, build_group_cohorts, build_rss_reference_table, load_d_gene_rows
 from vdj_bias.sarp_scores import load_sarp_scores
-from vdj_bias.simulate import GROUP_TO_SUPERPOPS, simulate_group_cohort
-from vdj_bias.vdjbase_client import build_rss_reference_table
+from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_rss_table
+
+
+def merge_rss_tables(primary: pd.DataFrame, fallback: pd.DataFrame) -> pd.DataFrame:
+    """Prefer the KIARVA-genotype-file-derived table (much larger N); fill in
+    any (gene, allele, side) it's missing from the VDJbase long-read table."""
+    if primary.empty:
+        return fallback
+    if fallback.empty:
+        return primary
+    have = set(zip(primary["gene"], primary["allele"], primary["side"]))
+    extra = fallback[~fallback.apply(lambda r: (r["gene"], r["allele"], r["side"]) in have, axis=1)]
+    return pd.concat([primary, extra], ignore_index=True)
 
 
 def main():
@@ -59,23 +67,25 @@ def main():
     sarp_scores = load_sarp_scores(cache_dir / "sarp")
     print(f"      {len(sarp_scores)} RSS 9-mer skoru yuklendi.")
 
-    print("[2/5] KIARVA'dan IGHD gen listesi cekiliyor...")
-    kiarva = KiarvaClient(cache_dir / "kiarva")
-    all_genes = kiarva.list_d_genes()
-    genes = args.genes if args.genes else all_genes
-    print(f"      {len(genes)} D geni ile calisilacak.")
+    print("[2/5] KIARVA'nin resmi 1KGP genotip dosyasi indiriliyor (github.com/ScilifelabDataCentre/kiarva-backend)...")
+    d_rows = load_d_gene_rows(cache_dir / "kiarva_genotypes")
+    n_people = d_rows["case"].nunique()
+    genes = args.genes if args.genes else sorted(d_rows["gene"].unique())
+    print(f"      {n_people} gercek birey, {len(genes)} D geni.")
 
-    print("[3/5] VDJbase'den gercek D-RSS referans tablosu insa ediliyor (IGenotyper, Rodriguez et al. 2023)...")
-    rss_ref = build_rss_reference_table(cache_dir / "vdjbase", max_subjects=args.max_vdjbase_subjects)
-    print(f"      {len(rss_ref)} (gen, alel, tarafi) RSS referans satiri bulundu.")
+    print("[3/5] Gercek D-RSS referans tablosu insa ediliyor (genotip dosyasindaki flank-uzatilmis okumalar + VDJbase yedegi)...")
+    primary_rss = build_rss_reference_table(d_rows)
+    vdjbase_rss = build_vdjbase_rss_table(cache_dir / "vdjbase", max_subjects=args.max_vdjbase_subjects)
+    rss_ref = merge_rss_tables(primary_rss, vdjbase_rss)
+    print(f"      {len(rss_ref)} (gen, alel, tarafi) RSS referans satiri (KIARVA-genotip: {len(primary_rss)}, VDJbase-yedek: {len(vdjbase_rss)}).")
 
-    print(f"[4/5] Her kitasal grup icin {args.n_per_group} kisilik pseudo-kohort simule ediliyor (Hardy-Weinberg, gercek KIARVA frekanslariyla)...")
-    cohorts = {}
+    print(f"[4/5] Her kitasal grup icin {args.n_per_group} GERCEK kisi seciliyor (alt-populasyon oranlari korunarak)...")
+    cohorts = build_group_cohorts(d_rows, genes, n_per_group=args.n_per_group, seed=args.seed)
     for group in GROUP_TO_SUPERPOPS:
-        print(f"      {group}...")
-        cohorts[group] = simulate_group_cohort(group, genes, kiarva, n_per_group=args.n_per_group, seed=args.seed)
+        any_gene = genes[0]
+        print(f"      {group}: {len(cohorts[group][any_gene])} kisi")
 
-    print("[5/5] SARP skorlari eslestiriliyor ve istatistik calisitiriliyor...")
+    print("[5/5] SARP skorlari eslestiriliyor ve istatistik calistiriliyor...")
     all_reports = []
     for side, side_label in [("5", "5prime_V_tarafi"), ("3", "3prime_J_tarafi")]:
         scored = score_cohorts(cohorts, rss_ref, sarp_scores, side=side)

@@ -53,6 +53,10 @@ def score_cohorts(
             for idx, (a1, a2) in enumerate(genotypes):
                 hap_scores = []
                 for allele in (a1, a2):
+                    if allele is None:
+                        # no call for this person/gene (e.g. a real structural
+                        # deletion) - do not impute a gene-level score for it
+                        continue
                     rss9mer = _lookup_rss9mer(gene, allele, side, rss_ref)
                     if rss9mer and rss9mer in score_lookup:
                         hap_scores.append(score_lookup[rss9mer])
