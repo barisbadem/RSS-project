@@ -19,16 +19,16 @@ import pandas as pd
 from scipy import stats
 
 
-def _lookup_rss9mer(gene: str, allele: str, side: str, rss_ref: pd.DataFrame) -> str | None:
-    hit = rss_ref[(rss_ref["gene"] == gene) & (rss_ref["allele"] == allele) & (rss_ref["side"] == side)]
-    if not hit.empty:
-        return hit.iloc[0]["rss9mer"]
-    fallback = rss_ref[
-        (rss_ref["gene"] == gene) & (rss_ref["allele"] == "__GENE_LEVEL__") & (rss_ref["side"] == side)
-    ]
-    if not fallback.empty:
-        return fallback.iloc[0]["rss9mer"]
-    return None
+def _build_rss_lookups(rss_ref: pd.DataFrame, side: str) -> tuple[dict[tuple[str, str], str], dict[str, str]]:
+    """One-time O(n) pass building {(gene, allele): rss9mer} and the
+    {gene: rss9mer} '__GENE_LEVEL__' fallback, so scoring each individual is
+    O(1) instead of re-filtering the whole rss_ref DataFrame per lookup."""
+    side_rows = rss_ref[rss_ref["side"] == side]
+    specific = side_rows[side_rows["allele"] != "__GENE_LEVEL__"]
+    gene_level = side_rows[side_rows["allele"] == "__GENE_LEVEL__"]
+    specific_lookup = dict(zip(zip(specific["gene"], specific["allele"]), specific["rss9mer"]))
+    gene_level_lookup = dict(zip(gene_level["gene"], gene_level["rss9mer"]))
+    return specific_lookup, gene_level_lookup
 
 
 def score_cohorts(
@@ -47,9 +47,11 @@ def score_cohorts(
     NaN when neither haplotype allele maps to a known RSS).
     """
     score_lookup = dict(zip(sarp_scores["rss9mer"], sarp_scores["mean_score"]))
+    specific_lookup, gene_level_lookup = _build_rss_lookups(rss_ref, side)
     rows = []
     for group, gene_map in cohorts.items():
         for gene, genotypes in gene_map.items():
+            gene_fallback = gene_level_lookup.get(gene)
             for idx, (a1, a2) in enumerate(genotypes):
                 hap_scores = []
                 for allele in (a1, a2):
@@ -57,7 +59,7 @@ def score_cohorts(
                         # no call for this person/gene (e.g. a real structural
                         # deletion) - do not impute a gene-level score for it
                         continue
-                    rss9mer = _lookup_rss9mer(gene, allele, side, rss_ref)
+                    rss9mer = specific_lookup.get((gene, allele), gene_fallback)
                     if rss9mer and rss9mer in score_lookup:
                         hap_scores.append(score_lookup[rss9mer])
                 if hap_scores:
