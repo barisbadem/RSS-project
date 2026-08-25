@@ -112,7 +112,7 @@ def run_statistics(scored: pd.DataFrame, alpha: float = 0.05) -> pd.DataFrame:
             h, p = stats.kruskal(*samples)
         except ValueError:
             continue
-        kw_rows.append({"gene": gene, "test": "Kruskal-Wallis (3 grup)", "statistic": h, "p_value": p})
+        kw_rows.append({"gene": gene, "test": f"Kruskal-Wallis ({len(samples)} grup)", "statistic": h, "p_value": p})
     kw_df = pd.DataFrame(kw_rows)
     if not kw_df.empty:
         kw_df["p_adj_bh"] = _benjamini_hochberg(kw_df["p_value"].values)
