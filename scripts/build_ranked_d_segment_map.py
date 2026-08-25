@@ -36,7 +36,14 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from vdj_bias.analysis import run_statistics, score_cohorts
-from vdj_bias.kiarva_genotypes import GROUP_TO_SUPERPOPS, build_group_cohorts, build_rss_reference_table, build_genotype_cohort, load_d_gene_rows
+from vdj_bias.kiarva_genotypes import (
+    GROUP_TO_SUPERPOPS,
+    build_genotype_cohort,
+    build_group_cohorts,
+    build_per_person_rss_table,
+    build_rss_reference_table,
+    load_d_gene_rows,
+)
 from vdj_bias.sarp_scores import load_sarp_scores
 from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_rss_table
 
@@ -58,12 +65,12 @@ def load_shared_inputs(cache_dir: Path):
     return d_rows, sarp_scores, rss_ref, genes
 
 
-def combined_per_person_scores(cohorts, rss_ref, sarp_scores, genes) -> pd.DataFrame:
+def combined_per_person_scores(cohorts, rss_ref, sarp_scores, genes, per_person_rss=None) -> pd.DataFrame:
     """One row per (group, gene, individual_idx): combined_score = mean of
     that person's 5'-side and 3'-side scores, or whichever one exists."""
     frames = []
     for side in ("5", "3"):
-        scored = score_cohorts(cohorts, rss_ref, sarp_scores, side=side)
+        scored = score_cohorts(cohorts, rss_ref, sarp_scores, side=side, per_person_rss=per_person_rss)
         if scored.empty:
             continue
         scored = scored.rename(columns={"sarp_score": f"score_{side}"})
@@ -212,16 +219,18 @@ def main():
     print("[1/4] Ortak veriler yukleniyor (SARP skorlari, genotip, RSS referans tablosu)...")
     d_rows, sarp_scores, rss_ref, genes = load_shared_inputs(cache_dir)
 
+    per_person_rss = build_per_person_rss_table(d_rows)
+
     print("[2/4] Tum gercek bireyler icin birlesik (5'+3' ortalama) skor hesaplaniyor...")
     all_cases = d_rows["case"].unique().tolist()
     all_cohort = {"All": build_genotype_cohort(d_rows, all_cases, genes)}
-    all_scored = combined_per_person_scores(all_cohort, rss_ref, sarp_scores, genes)
+    all_scored = combined_per_person_scores(all_cohort, rss_ref, sarp_scores, genes, per_person_rss)
     ranked = rank_genes(all_scored)
     print(f"      {len(ranked)} gen siralandi (veri olmayanlar haric).")
 
     print("[3/4] Cografi kohortlar (gercek 410/grup) icin ayni birlesik skor + istatistik...")
     geo_cohorts = build_group_cohorts(d_rows, genes, n_per_group=args.n_per_group, seed=args.seed)
-    region_scored = combined_per_person_scores(geo_cohorts, rss_ref, sarp_scores, genes)
+    region_scored = combined_per_person_scores(geo_cohorts, rss_ref, sarp_scores, genes, per_person_rss)
     kw_df, _ = run_statistics(region_scored, alpha=ALPHA)
     sig = {row["gene"]: bool(row["significant"]) and pd.notna(row["p_value"]) for _, row in kw_df.iterrows()}
     n_sig = sum(sig.values())

@@ -32,15 +32,21 @@ def _build_rss_lookups(rss_ref: pd.DataFrame, side: str) -> tuple[dict[tuple[str
 
 
 def score_cohorts(
-    cohorts: dict[str, dict[str, list[tuple[str, str]]]],
+    cohorts: dict[str, dict[str, list[tuple[str, str | None, str | None]]]],
     rss_ref: pd.DataFrame,
     sarp_scores: pd.DataFrame,
     side: str,
+    per_person_rss: dict[tuple[str, str, str, str], str] | None = None,
 ) -> pd.DataFrame:
     """
-    cohorts: {group: {gene: [(allele_h1, allele_h2), ...n individuals]}}
+    cohorts: {group: {gene: [(case, allele_h1, allele_h2), ...n individuals]}}
     side: '5' or '3' (5'=V-proximal RSS, 3'=J-proximal RSS - "J tarafı" in the
           user's phrasing is side='3')
+    per_person_rss: optional {(case, gene, side, allele): rss9mer} from
+        kiarva_genotypes.build_per_person_rss_table - when given, a person's
+        OWN directly-observed RSS read is used ahead of the allele/gene-level
+        population consensus in rss_ref, so real (rare) per-individual
+        variants are never silently overwritten by a majority vote.
 
     Returns long-format DataFrame: group, gene, individual_idx, sarp_score
     (per individual, the mean SARP score of their two haplotype alleles;
@@ -48,18 +54,21 @@ def score_cohorts(
     """
     score_lookup = dict(zip(sarp_scores["rss9mer"], sarp_scores["mean_score"]))
     specific_lookup, gene_level_lookup = _build_rss_lookups(rss_ref, side)
+    per_person_rss = per_person_rss or {}
     rows = []
     for group, gene_map in cohorts.items():
         for gene, genotypes in gene_map.items():
             gene_fallback = gene_level_lookup.get(gene)
-            for idx, (a1, a2) in enumerate(genotypes):
+            for idx, (case, a1, a2) in enumerate(genotypes):
                 hap_scores = []
                 for allele in (a1, a2):
                     if allele is None:
                         # no call for this person/gene (e.g. a real structural
                         # deletion) - do not impute a gene-level score for it
                         continue
-                    rss9mer = specific_lookup.get((gene, allele), gene_fallback)
+                    rss9mer = per_person_rss.get((case, gene, side, allele))
+                    if rss9mer is None:
+                        rss9mer = specific_lookup.get((gene, allele), gene_fallback)
                     if rss9mer and rss9mer in score_lookup:
                         hap_scores.append(score_lookup[rss9mer])
                 if hap_scores:
@@ -68,6 +77,7 @@ def score_cohorts(
                             "group": group,
                             "gene": gene,
                             "individual_idx": idx,
+                            "case": case,
                             "sarp_score": float(np.mean(hap_scores)),
                         }
                     )

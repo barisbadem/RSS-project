@@ -32,7 +32,13 @@ from pathlib import Path
 import pandas as pd
 
 from vdj_bias.analysis import format_report_line, group_means, run_statistics, score_cohorts
-from vdj_bias.kiarva_genotypes import GROUP_TO_SUPERPOPS, build_group_cohorts, build_rss_reference_table, load_d_gene_rows
+from vdj_bias.kiarva_genotypes import (
+    GROUP_TO_SUPERPOPS,
+    build_group_cohorts,
+    build_per_person_rss_table,
+    build_rss_reference_table,
+    load_d_gene_rows,
+)
 from vdj_bias.sarp_scores import load_sarp_scores
 from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_rss_table
 
@@ -78,6 +84,7 @@ def main():
     vdjbase_rss = build_vdjbase_rss_table(cache_dir / "vdjbase", max_subjects=args.max_vdjbase_subjects)
     rss_ref = merge_rss_tables(primary_rss, vdjbase_rss)
     print(f"      {len(rss_ref)} (gen, alel, tarafi) RSS referans satiri (KIARVA-genotip: {len(primary_rss)}, VDJbase-yedek: {len(vdjbase_rss)}).")
+    per_person_rss = build_per_person_rss_table(d_rows)
 
     print(f"[4/5] Her kitasal grup icin {args.n_per_group} GERCEK kisi seciliyor (alt-populasyon oranlari korunarak)...")
     cohorts = build_group_cohorts(d_rows, genes, n_per_group=args.n_per_group, seed=args.seed)
@@ -88,7 +95,7 @@ def main():
     print("[5/5] SARP skorlari eslestiriliyor ve istatistik calistiriliyor...")
     all_reports = []
     for side, side_label in [("5", "5prime_V_tarafi"), ("3", "3prime_J_tarafi")]:
-        scored = score_cohorts(cohorts, rss_ref, sarp_scores, side=side)
+        scored = score_cohorts(cohorts, rss_ref, sarp_scores, side=side, per_person_rss=per_person_rss)
         if scored.empty:
             print(f"      Uyari: {side_label} icin eslesen veri yok, atlaniyor.")
             continue

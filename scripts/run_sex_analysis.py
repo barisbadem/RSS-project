@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 
 from vdj_bias.analysis import format_report_line, group_means, run_statistics, score_cohorts
-from vdj_bias.kiarva_genotypes import build_rss_reference_table, load_d_gene_rows
+from vdj_bias.kiarva_genotypes import build_per_person_rss_table, build_rss_reference_table, load_d_gene_rows
 from vdj_bias.sarp_scores import load_sarp_scores
 from vdj_bias.sex_metadata import load_sex_map
 from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_rss_table
@@ -45,11 +45,11 @@ def build_sex_cohorts(d_rows: pd.DataFrame, sex_map: dict[str, str], genes: list
             for gene in genes:
                 alleles = sorted(by_case_gene.get((case, gene), set()))
                 if len(alleles) == 0:
-                    cohort[gene].append((None, None))
+                    cohort[gene].append((case, None, None))
                 elif len(alleles) == 1:
-                    cohort[gene].append((alleles[0], alleles[0]))
+                    cohort[gene].append((case, alleles[0], alleles[0]))
                 else:
-                    cohort[gene].append((alleles[0], alleles[1]))
+                    cohort[gene].append((case, alleles[0], alleles[1]))
         cohorts[sex] = cohort
     return cohorts
 
@@ -82,6 +82,7 @@ def main():
     have = set(zip(primary_rss["gene"], primary_rss["allele"], primary_rss["side"]))
     extra = vdjbase_rss[~vdjbase_rss.apply(lambda r: (r["gene"], r["allele"], r["side"]) in have, axis=1)]
     rss_ref = pd.concat([primary_rss, extra], ignore_index=True)
+    per_person_rss = build_per_person_rss_table(d_rows)
 
     print("[4/4] Erkek/Kadin kohortlari olusturuluyor, SARP skorlari eslestiriliyor, istatistik calistiriliyor...")
     cohorts = build_sex_cohorts(d_rows, sex_map, genes)
@@ -90,7 +91,7 @@ def main():
 
     all_reports = []
     for side, side_label in [("5", "5prime_V_tarafi"), ("3", "3prime_J_tarafi")]:
-        scored = score_cohorts(cohorts, rss_ref, sarp_scores, side=side)
+        scored = score_cohorts(cohorts, rss_ref, sarp_scores, side=side, per_person_rss=per_person_rss)
         if scored.empty:
             print(f"      Uyari: {side_label} icin eslesen veri yok, atlaniyor.")
             continue

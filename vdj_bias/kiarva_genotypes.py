@@ -105,13 +105,11 @@ def load_d_gene_rows(cache_dir: Path) -> pd.DataFrame:
     return df
 
 
-def build_rss_reference_table(d_rows: pd.DataFrame) -> pd.DataFrame:
-    """
-    Real, directly-observed RSS lookup table, same shape as
-    vdjbase_client.build_rss_reference_table: gene, allele, side, rss9mer,
-    n_observations (plus '__GENE_LEVEL__' fallback rows per gene/side).
-    """
-    # core D-REGION sequence per (gene, base_allele), from the short rows
+def _extract_raw_rss_rows(d_rows: pd.DataFrame) -> pd.DataFrame:
+    """One row per real, individual flank-extended read that yields a valid
+    CAC-starting 9-mer: case, gene, allele (IMGT-style base_db_name), side,
+    rss9mer. This is the un-aggregated, per-person ground truth - nothing is
+    collapsed to a majority/consensus value here."""
     core_seq: dict[tuple[str, str], str] = {}
     short_rows = d_rows[~d_rows["is_long"]]
     for gene, base_allele, seq in zip(short_rows["gene"], short_rows["base_allele"], short_rows["sequence"]):
@@ -119,8 +117,8 @@ def build_rss_reference_table(d_rows: pd.DataFrame) -> pd.DataFrame:
 
     rows = []
     long_rows = d_rows[d_rows["is_long"]]
-    for gene, base_allele, base_db_name, seq in zip(
-        long_rows["gene"], long_rows["base_allele"], long_rows["base_db_name"], long_rows["sequence"]
+    for case, gene, base_allele, base_db_name, seq in zip(
+        long_rows["case"], long_rows["gene"], long_rows["base_allele"], long_rows["base_db_name"], long_rows["sequence"]
     ):
         core = core_seq.get((gene, base_allele))
         if not core:
@@ -132,16 +130,47 @@ def build_rss_reference_table(d_rows: pd.DataFrame) -> pd.DataFrame:
         if len(suffix) >= 9:
             mer3 = suffix[:9]
             if mer3.startswith("CAC"):
-                rows.append({"gene": gene, "allele": base_db_name, "side": "3", "rss9mer": mer3})
+                rows.append({"case": case, "gene": gene, "allele": base_db_name, "side": "3", "rss9mer": mer3})
         if len(prefix) >= 9:
             mer5 = prefix[-7:] + prefix[-9:-7]
             if mer5.startswith("CAC"):
-                rows.append({"gene": gene, "allele": base_db_name, "side": "5", "rss9mer": mer5})
+                rows.append({"case": case, "gene": gene, "allele": base_db_name, "side": "5", "rss9mer": mer5})
 
-    if not rows:
+    return pd.DataFrame(rows, columns=["case", "gene", "allele", "side", "rss9mer"])
+
+
+def build_per_person_rss_table(d_rows: pd.DataFrame) -> dict[tuple[str, str, str, str], str]:
+    """{(case, gene, side, allele): rss9mer} - each real individual's OWN
+    directly-observed RSS, not a population-level majority substitute. Use
+    this as the first-choice lookup when scoring a specific person; only fall
+    back to build_rss_reference_table's allele/gene-level consensus for a
+    person who has no flank-extended read of their own for that gene."""
+    raw = _extract_raw_rss_rows(d_rows)
+    # a person can have >1 read for the same (gene, side, allele) - if they
+    # ever disagree (sequencing noise) keep whichever was seen most often
+    # for that SPECIFIC person, never someone else's.
+    counted = raw.groupby(["case", "gene", "side", "allele", "rss9mer"]).size().reset_index(name="n")
+    counted = counted.sort_values("n", ascending=False).drop_duplicates(subset=["case", "gene", "side", "allele"], keep="first")
+    return {
+        (row["case"], row["gene"], row["side"], row["allele"]): row["rss9mer"] for _, row in counted.iterrows()
+    }
+
+
+def build_rss_reference_table(d_rows: pd.DataFrame) -> pd.DataFrame:
+    """
+    Real, directly-observed RSS lookup table, same shape as
+    vdjbase_client.build_rss_reference_table: gene, allele, side, rss9mer,
+    n_observations (plus '__GENE_LEVEL__' fallback rows per gene/side).
+
+    This is a population-level CONSENSUS (majority vote per gene/allele) -
+    used only as a fallback for individuals who lack their own
+    flank-extended read (see build_per_person_rss_table for the real,
+    per-person ground truth that should be preferred whenever available).
+    """
+    raw = _extract_raw_rss_rows(d_rows)
+    if raw.empty:
         return pd.DataFrame(columns=["gene", "allele", "side", "rss9mer", "n_observations"])
 
-    raw = pd.DataFrame(rows)
     grouped = (
         raw.groupby(["gene", "allele", "side", "rss9mer"])
         .size()
@@ -187,26 +216,28 @@ def stratified_sample_cases(d_rows: pd.DataFrame, superpops: list[str], n: int, 
 
 def build_genotype_cohort(
     d_rows: pd.DataFrame, cases: list[str], genes: list[str]
-) -> dict[str, list[tuple[str | None, str | None]]]:
-    """{'IGHD3-10': [(db_name_h1, db_name_h2_or_None), ...one per case...], ...}
+) -> dict[str, list[tuple[str, str | None, str | None]]]:
+    """{'IGHD3-10': [(case, db_name_h1, db_name_h2_or_None), ...one per case...], ...}
     Two distinct base alleles = real heterozygous genotype; one = homozygous
     (represented twice); a gene with no call for that person (e.g. a real
-    structural deletion) yields (None, None)."""
+    structural deletion) yields (None, None). The case id is carried through
+    so scoring can look up that SPECIFIC person's own observed RSS read
+    (see build_per_person_rss_table) instead of a population consensus."""
     subset = d_rows[d_rows["case"].isin(cases) & d_rows["gene"].isin(genes)]
     by_case_gene: dict[tuple[str, str], set[str]] = defaultdict(set)
     for case, gene, db_name in zip(subset["case"], subset["gene"], subset["base_db_name"]):
         by_case_gene[(case, gene)].add(db_name)
 
-    cohort: dict[str, list[tuple[str | None, str | None]]] = {gene: [] for gene in genes}
+    cohort: dict[str, list[tuple[str, str | None, str | None]]] = {gene: [] for gene in genes}
     for case in cases:
         for gene in genes:
             alleles = sorted(by_case_gene.get((case, gene), set()))
             if len(alleles) == 0:
-                cohort[gene].append((None, None))
+                cohort[gene].append((case, None, None))
             elif len(alleles) == 1:
-                cohort[gene].append((alleles[0], alleles[0]))
+                cohort[gene].append((case, alleles[0], alleles[0]))
             else:
-                cohort[gene].append((alleles[0], alleles[1]))
+                cohort[gene].append((case, alleles[0], alleles[1]))
     return cohort
 
 
