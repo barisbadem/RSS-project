@@ -98,11 +98,26 @@ def load_d_gene_rows(cache_dir: Path) -> pd.DataFrame:
     df["superpopulation"] = [p[2] for p in parsed]
     df["base_allele"] = df["allele"].map(_strip_variant_suffix)
     df["base_db_name"] = df["db_name"].map(_strip_variant_suffix)
-    df["is_long"] = df["sequence"].str.len() > 25
+    # a flank-extended read's allele carries a variant suffix (e.g. "01_F1");
+    # a plain core-only D-REGION call has none. D-REGION length itself is NOT
+    # a reliable signal - some genes' core sequence is 31-37nt, well past
+    # what a fixed length cutoff would call "long".
+    df["is_long"] = df["allele"] != df["base_allele"]
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     df.to_pickle(pickle_cache)
     return df
+
+
+def build_core_sequence_lookup(d_rows: pd.DataFrame) -> dict[tuple[str, str], str]:
+    """{(gene, base_allele): D-REGION coding sequence} - the actual D segment
+    itself (NOT the flanking RSS), one real observed sequence per named
+    allele. Source: the plain short rows (allele has no '_F1'-style suffix)."""
+    core_seq: dict[tuple[str, str], str] = {}
+    short_rows = d_rows[~d_rows["is_long"]]
+    for gene, base_allele, seq in zip(short_rows["gene"], short_rows["base_allele"], short_rows["sequence"]):
+        core_seq.setdefault((gene, base_allele), seq)
+    return core_seq
 
 
 def _extract_raw_rss_rows(d_rows: pd.DataFrame) -> pd.DataFrame:
@@ -110,10 +125,7 @@ def _extract_raw_rss_rows(d_rows: pd.DataFrame) -> pd.DataFrame:
     CAC-starting 9-mer: case, gene, allele (IMGT-style base_db_name), side,
     rss9mer. This is the un-aggregated, per-person ground truth - nothing is
     collapsed to a majority/consensus value here."""
-    core_seq: dict[tuple[str, str], str] = {}
-    short_rows = d_rows[~d_rows["is_long"]]
-    for gene, base_allele, seq in zip(short_rows["gene"], short_rows["base_allele"], short_rows["sequence"]):
-        core_seq.setdefault((gene, base_allele), seq)
+    core_seq = build_core_sequence_lookup(d_rows)
 
     rows = []
     long_rows = d_rows[d_rows["is_long"]]
