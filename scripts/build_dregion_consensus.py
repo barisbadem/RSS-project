@@ -9,11 +9,12 @@ where a real geographic signal is actually expected.
 
 For each of the 27 IGHD genes:
   1. Real per-person D-REGION sequences (both haplotypes) are pulled from
-     KIARVA's genotype file, overlapped (stacked, all same-length sequences
-     compared position by position - the dominant allele length is used;
-     other-length haplotypes, i.e. real indel variants, are counted and
-     reported separately, never merged into a consensus they don't fit) and
-     a position-by-position consensus D-REGION sequence is called.
+     KIARVA's genotype file and overlapped: every real observation is stacked
+     up (no length-based pre-filtering - a handful of indel-variant,
+     different-length haplotypes among hundreds/thousands of others simply
+     get outvoted naturally at whichever positions they reach) and a
+     position-by-position consensus D-REGION sequence is called at the modal
+     (most common) length.
   2. Two deliverables, exactly as requested:
      a) results/D_Region_Konsensus_TumInsanlar.xlsx - one consensus per gene,
         pooled across every real individual in the sample.
@@ -75,28 +76,37 @@ def haplotype_alleles_per_gene(cohort_by_gene: dict, genes: list[str]) -> dict[s
 
 
 def consensus_for_dominant_length(sequences: list[str]) -> dict:
+    """Stacks up EVERY real observed sequence, no length-based pre-filtering:
+    a handful of indel-variant (different-length) sequences among hundreds or
+    thousands of others simply get outvoted naturally at whichever positions
+    they even reach - they don't need to be excluded by hand beforehand, and
+    doing so would hide exactly the kind of real minority variant the
+    consensus/agreement numbers are supposed to surface."""
     length_counts = Counter(len(s) for s in sequences)
-    dominant_length, n_dominant = length_counts.most_common(1)[0]
-    same_length = [s for s in sequences if len(s) == dominant_length]
+    modal_length, n_modal = length_counts.most_common(1)[0]
+    max_length = max(len(s) for s in sequences)
 
     consensus_chars = []
     match_fracs = []
-    for pos in range(dominant_length):
-        counts = Counter(s[pos] for s in same_length)
+    for pos in range(max_length):
+        counts = Counter(s[pos] for s in sequences if len(s) > pos)
         base, count = counts.most_common(1)[0]
+        n_at_pos = sum(counts.values())
         consensus_chars.append(base)
-        match_fracs.append(count / len(same_length))
-    consensus = "".join(consensus_chars)
-    exact_matches = sum(1 for s in same_length if s == consensus)
+        match_fracs.append(count / n_at_pos)
+    # report the consensus at the modal length (the length most people
+    # actually have) - positions beyond it belong to longer minority variants
+    consensus = "".join(consensus_chars[:modal_length])
+    exact_matches = sum(1 for s in sequences if s == consensus)
 
     return {
-        "dominant_length": dominant_length,
-        "n_dominant_length": n_dominant,
+        "modal_length": modal_length,
+        "n_modal_length": n_modal,
         "n_total": len(sequences),
-        "pct_dominant_length": n_dominant / len(sequences),
+        "n_distinct_lengths": len(length_counts),
         "consensus": consensus,
-        "exact_match_pct": exact_matches / len(same_length),
-        "min_position_agreement": min(match_fracs),
+        "exact_match_pct": exact_matches / len(sequences),
+        "min_position_agreement": min(match_fracs[:modal_length]),
     }
 
 
@@ -113,13 +123,14 @@ def build_pooled_workbook(
     ws.merge_cells("A2:I2")
     ws["A2"] = (
         "Sira = o D geninin SARP skoruna gore final VDJ'ye katilma ihtimali sirasi (1=en yuksek; bu sira "
-        "herkeste ayni, cunku RSS herkeste ayni - bkz. onceki analiz). O siradaki genin, tum gercek "
-        "bireylerin kendi D-REGION dizileri ust uste konup (ayni uzunluktaki cogunluk grubu icinde) "
-        "pozisyon pozisyon konsensusu cikarildi."
+        "herkeste ayni, cunku RSS herkeste ayni - bkz. onceki analiz). O siradaki genin TUM gercek "
+        "bireylerin (~2472 kisi, haplotip bazinda) D-REGION dizileri, uzunluk farki gozetmeksizin "
+        "hepsi ust uste konup pozisyon pozisyon konsensus cikarildi - nadir farkli-uzunluktaki "
+        "(indel) gozlemler elenmedi, kendiliginden azinlikta kalip oy kaybetti."
     )
     ws["A2"].font = Font(name=FONT, size=9, italic=True, color="595959")
 
-    headers = ["Sira", "D Geni", "Konsensus D-REGION", "Uzunluk (nt)", "Bu Uzunlukta N", "Toplam N", "Bu Uzunluk %", "Tam Eslesme %", "En Dusuk Pozisyon Uyum %"]
+    headers = ["Sira", "D Geni", "Konsensus D-REGION", "Uzunluk (nt)", "Bu Uzunlukta N", "Toplam N", "Farkli Uzunluk Sayisi", "Tam Eslesme %", "En Dusuk Pozisyon Uyum %"]
     for c, h in enumerate(headers, start=1):
         cell = ws.cell(row=4, column=c, value=h)
         cell.font = Font(name=FONT, size=10, bold=True, color="FFFFFF")
@@ -139,10 +150,10 @@ def build_pooled_workbook(
         vals = [
             gene,
             stat["consensus"],
-            stat["dominant_length"],
-            stat["n_dominant_length"],
+            stat["modal_length"],
+            stat["n_modal_length"],
             stat["n_total"],
-            f"{stat['pct_dominant_length'] * 100:.1f}%",
+            stat["n_distinct_lengths"],
             f"{stat['exact_match_pct'] * 100:.1f}%",
             f"{stat['min_position_agreement'] * 100:.1f}%",
         ]
