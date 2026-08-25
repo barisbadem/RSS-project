@@ -42,8 +42,18 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from scipy import stats
 
+from scripts.build_ranked_d_segment_map import combined_per_person_scores, rank_genes
 from vdj_bias.analysis import _benjamini_hochberg
-from vdj_bias.kiarva_genotypes import GROUP_TO_SUPERPOPS, build_genotype_cohort, build_group_cohorts, load_d_gene_rows
+from vdj_bias.kiarva_genotypes import (
+    GROUP_TO_SUPERPOPS,
+    build_genotype_cohort,
+    build_group_cohorts,
+    build_per_person_rss_table,
+    build_rss_reference_table,
+    load_d_gene_rows,
+)
+from vdj_bias.sarp_scores import load_sarp_scores
+from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_rss_table
 
 FONT = "Arial"
 ALPHA = 0.05
@@ -90,24 +100,26 @@ def consensus_for_dominant_length(sequences: list[str]) -> dict:
     }
 
 
-def build_pooled_workbook(genes: list[str], allele_seq: dict, alleles_all: dict[str, list[str]], out_path: Path):
+def build_pooled_workbook(
+    genes: list[str], allele_seq: dict, alleles_all: dict[str, list[str]], rank_map: dict[str, int], out_path: Path
+):
     wb = Workbook()
     ws = wb.active
     ws.title = "D_REGION_TumInsanlar"
 
-    ws.merge_cells("A1:H1")
-    ws["A1"] = "D Segmenti (D-REGION) Konsensus Dizisi - Tum Orneklem"
+    ws.merge_cells("A1:I1")
+    ws["A1"] = "D Segmenti (D-REGION) Konsensus Dizisi - SARP/VDJ-Katilim Sirasina Gore, Tum Orneklem"
     ws["A1"].font = Font(name=FONT, size=13, bold=True)
-    ws.merge_cells("A2:H2")
+    ws.merge_cells("A2:I2")
     ws["A2"] = (
-        "Her D geni icin, tum gercek bireylerin (haplotip bazinda) kendi D-REGION dizileri ust uste "
-        "konup (ayni uzunluktaki cogunluk grubu icinde) pozisyon pozisyon konsensus cikarildi. Farkli "
-        "uzunlukta (indel/insersiyon-delesyon icren nadir alel) gozlemler ayri sayildi, konsensusa "
-        "zorla uydurulmadi."
+        "Sira = o D geninin SARP skoruna gore final VDJ'ye katilma ihtimali sirasi (1=en yuksek; bu sira "
+        "herkeste ayni, cunku RSS herkeste ayni - bkz. onceki analiz). O siradaki genin, tum gercek "
+        "bireylerin kendi D-REGION dizileri ust uste konup (ayni uzunluktaki cogunluk grubu icinde) "
+        "pozisyon pozisyon konsensusu cikarildi."
     )
     ws["A2"].font = Font(name=FONT, size=9, italic=True, color="595959")
 
-    headers = ["D Geni", "Konsensus D-REGION", "Uzunluk (nt)", "Bu Uzunlukta N", "Toplam N", "Bu Uzunluk %", "Tam Eslesme %", "En Dusuk Pozisyon Uyum %"]
+    headers = ["Sira", "D Geni", "Konsensus D-REGION", "Uzunluk (nt)", "Bu Uzunlukta N", "Toplam N", "Bu Uzunluk %", "Tam Eslesme %", "En Dusuk Pozisyon Uyum %"]
     for c, h in enumerate(headers, start=1):
         cell = ws.cell(row=4, column=c, value=h)
         cell.font = Font(name=FONT, size=10, bold=True, color="FFFFFF")
@@ -116,10 +128,11 @@ def build_pooled_workbook(genes: list[str], allele_seq: dict, alleles_all: dict[
 
     r = 5
     for gene in genes:
+        ws.cell(row=r, column=1, value=rank_map.get(gene, "-")).alignment = Alignment(horizontal="center")
         seqs = [allele_seq[a] for a in alleles_all[gene] if a in allele_seq]
         if not seqs:
-            ws.cell(row=r, column=1, value=gene).font = Font(name=FONT, bold=True)
-            ws.cell(row=r, column=2, value="veri yok").font = Font(name=FONT, italic=True, color="808080")
+            ws.cell(row=r, column=2, value=gene).font = Font(name=FONT, bold=True)
+            ws.cell(row=r, column=3, value="veri yok").font = Font(name=FONT, italic=True, color="808080")
             r += 1
             continue
         stat = consensus_for_dominant_length(seqs)
@@ -133,14 +146,14 @@ def build_pooled_workbook(genes: list[str], allele_seq: dict, alleles_all: dict[
             f"{stat['exact_match_pct'] * 100:.1f}%",
             f"{stat['min_position_agreement'] * 100:.1f}%",
         ]
-        for c, v in enumerate(vals, start=1):
+        for c, v in enumerate(vals, start=2):
             cell = ws.cell(row=r, column=c, value=v)
             cell.alignment = Alignment(horizontal="center")
-            if c == 1:
+            if c == 2:
                 cell.font = Font(name=FONT, bold=True)
         r += 1
 
-    for i, w in enumerate([12, 24, 12, 14, 12, 12, 14, 18], start=1):
+    for i, w in enumerate([6, 12, 24, 12, 14, 12, 12, 14, 18], start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A5"
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,7 +161,11 @@ def build_pooled_workbook(genes: list[str], allele_seq: dict, alleles_all: dict[
 
 
 def build_geographic_workbook(
-    genes: list[str], allele_seq: dict, alleles_by_group: dict[str, dict[str, list[str]]], out_path: Path
+    genes: list[str],
+    allele_seq: dict,
+    alleles_by_group: dict[str, dict[str, list[str]]],
+    rank_map: dict[str, int],
+    out_path: Path,
 ):
     groups = list(GROUP_TO_SUPERPOPS.keys())
 
@@ -182,18 +199,19 @@ def build_geographic_workbook(
     ws = wb.active
     ws.title = "D_REGION_Cografi"
 
-    ws.merge_cells("A1:H1")
-    ws["A1"] = "D Segmenti (D-REGION) Alel Frekansi - Kitasal Gruplara Gore Karsilastirma"
+    ws.merge_cells("A1:I1")
+    ws["A1"] = "D Segmenti (D-REGION) Alel Frekansi - SARP/VDJ-Katilim Sirasina Gore, Kitasal Karsilastirma"
     ws["A1"].font = Font(name=FONT, size=13, bold=True)
-    ws.merge_cells("A2:H2")
+    ws.merge_cells("A2:I2")
     ws["A2"] = (
+        "Sira = SARP skoruna gore final VDJ'ye katilma ihtimali sirasi (Tum Insanlar dosyasiyla ayni). "
         "Gercek 410 kisi/grup ile: her D geninin hangi alelini tasidigi Afrika/Asya/Avrupa arasinda "
         "karsilastirildi (ki-kare bagimsizlik testi, BH-duzeltmeli). '*' = alel bileşiminin gercekten "
         "cografyaya gore anlamli farklilik gosterdigi genler (p<0.05)."
     )
     ws["A2"].font = Font(name=FONT, size=9, italic=True, color="595959")
 
-    headers = ["D Geni", "En Sik Gorulen Alel (Havuz)", "Afrika %", "Asya %", "Avrupa %", "p (BH)", "Anlamli mi", "Test Edilen Alel Sayisi"]
+    headers = ["Sira", "D Geni", "En Sik Gorulen Alel (Havuz)", "Afrika %", "Asya %", "Avrupa %", "p (BH)", "Anlamli mi", "Test Edilen Alel Sayisi"]
     for c, h in enumerate(headers, start=1):
         cell = ws.cell(row=4, column=c, value=h)
         cell.font = Font(name=FONT, size=10, bold=True, color="FFFFFF")
@@ -202,9 +220,10 @@ def build_geographic_workbook(
 
     r = 5
     for gene in genes:
-        ws.cell(row=r, column=1, value=gene).font = Font(name=FONT, bold=True)
+        ws.cell(row=r, column=1, value=rank_map.get(gene, "-")).alignment = Alignment(horizontal="center")
+        ws.cell(row=r, column=2, value=gene).font = Font(name=FONT, bold=True)
         if gene not in gene_tables:
-            ws.cell(row=r, column=2, value="tek alel / veri yetersiz").font = Font(name=FONT, italic=True, color="808080")
+            ws.cell(row=r, column=3, value="tek alel / veri yetersiz").font = Font(name=FONT, italic=True, color="808080")
             r += 1
             continue
         allele_names, counts_by_group = gene_tables[gene]
@@ -212,19 +231,19 @@ def build_geographic_workbook(
         for g in groups:
             totals.update(counts_by_group[g])
         top_allele = totals.most_common(1)[0][0]
-        ws.cell(row=r, column=2, value=top_allele)
+        ws.cell(row=r, column=3, value=top_allele)
         for i, g in enumerate(groups):
             n_g = sum(counts_by_group[g].values())
             pct = counts_by_group[g].get(top_allele, 0) / n_g * 100 if n_g else 0
-            ws.cell(row=r, column=3 + i, value=f"{pct:.1f}%").alignment = Alignment(horizontal="center")
+            ws.cell(row=r, column=4 + i, value=f"{pct:.1f}%").alignment = Alignment(horizontal="center")
         p_adj_val = p_adj_map[gene]
         is_sig = p_adj_val < ALPHA
-        ws.cell(row=r, column=6, value=f"{p_adj_val:.2e}").alignment = Alignment(horizontal="center")
-        sig_cell = ws.cell(row=r, column=7, value="EVET *" if is_sig else "hayir")
+        ws.cell(row=r, column=7, value=f"{p_adj_val:.2e}").alignment = Alignment(horizontal="center")
+        sig_cell = ws.cell(row=r, column=8, value="EVET *" if is_sig else "hayir")
         sig_cell.alignment = Alignment(horizontal="center")
         if is_sig:
             sig_cell.font = Font(name=FONT, bold=True, color="1F6B2C")
-        ws.cell(row=r, column=8, value=len(allele_names)).alignment = Alignment(horizontal="center")
+        ws.cell(row=r, column=9, value=len(allele_names)).alignment = Alignment(horizontal="center")
         r += 1
 
     n_sig = sum(1 for g in genes_tested if p_adj_map[g] < ALPHA)
@@ -232,7 +251,7 @@ def build_geographic_workbook(
         name=FONT, size=10, italic=True
     )
 
-    for i, w in enumerate([12, 24, 10, 10, 10, 12, 12, 16], start=1):
+    for i, w in enumerate([6, 12, 24, 10, 10, 10, 12, 12, 16], start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A5"
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -252,7 +271,7 @@ def main():
     cache_dir = Path(args.cache_dir)
     out_dir = Path(args.out_dir)
 
-    print("[1/4] KIARVA genotip verisi ve D-REGION dizileri yukleniyor...")
+    print("[1/5] KIARVA genotip verisi ve D-REGION dizileri yukleniyor...")
     d_rows = load_d_gene_rows(cache_dir / "kiarva_genotypes")
     genes = sorted(d_rows["gene"].unique())
     allele_seq: dict[str, str] = {}
@@ -260,17 +279,37 @@ def main():
     for db_name, seq in zip(short_rows["base_db_name"], short_rows["sequence"]):
         allele_seq.setdefault(db_name, seq)
 
-    print("[2/4] Tum gercek bireyler icin D-REGION konsensusu (havuzlanmis)...")
+    print("[2/5] SARP skoruna gore VDJ-katilim sirasi hesaplaniyor (RSS zaten herkeste ayni oldugu icin bu sira herkeste sabit)...")
+    sarp_scores = load_sarp_scores(cache_dir / "sarp")
+    primary_rss = build_rss_reference_table(d_rows)
+    vdjbase_rss = build_vdjbase_rss_table(cache_dir / "vdjbase")
+    have = set(zip(primary_rss["gene"], primary_rss["allele"], primary_rss["side"]))
+    extra = vdjbase_rss[~vdjbase_rss.apply(lambda r: (r["gene"], r["allele"], r["side"]) in have, axis=1)]
+    rss_ref = pd.concat([primary_rss, extra], ignore_index=True)
+    per_person_rss = build_per_person_rss_table(d_rows)
+
     all_cases = d_rows["case"].unique().tolist()
     all_cohort = build_genotype_cohort(d_rows, all_cases, genes)
-    alleles_all = haplotype_alleles_per_gene(all_cohort, genes)
-    build_pooled_workbook(genes, allele_seq, alleles_all, out_dir / "D_Region_Konsensus_TumInsanlar.xlsx")
+    rank_cohort = {"All": all_cohort}
+    all_sarp_scored = combined_per_person_scores(rank_cohort, rss_ref, sarp_scores, genes, per_person_rss)
+    ranked = rank_genes(all_sarp_scored)
+    rank_map = dict(zip(ranked["gene"], ranked["rank"]))
+    # genes with no SARP data at all (e.g. IGHD4-11) still get a D-REGION
+    # consensus, just listed after the ranked ones, marked unranked ("-")
+    ordered_genes = list(ranked["gene"]) + [g for g in genes if g not in rank_map]
+    print(f"      {len(rank_map)} / {len(genes)} gen siralandi; kalanlarin SARP verisi yok (tabloda '-' ile gosterilecek).")
 
-    print(f"[3/4] Cografi kohortlar (gercek {args.n_per_group} kisi/grup) icin alel frekansi ki-kare testi...")
+    print("[3/5] Tum gercek bireyler icin D-REGION konsensusu (havuzlanmis, SARP sirasina gore)...")
+    alleles_all = haplotype_alleles_per_gene(all_cohort, genes)
+    build_pooled_workbook(ordered_genes, allele_seq, alleles_all, rank_map, out_dir / "D_Region_Konsensus_TumInsanlar.xlsx")
+
+    print(f"[4/5] Cografi kohortlar (gercek {args.n_per_group} kisi/grup) icin alel frekansi ki-kare testi...")
     geo_cohorts = build_group_cohorts(d_rows, genes, n_per_group=args.n_per_group, seed=args.seed)
     alleles_by_group = {g: haplotype_alleles_per_gene(geo_cohorts[g], genes) for g in GROUP_TO_SUPERPOPS}
-    n_sig, n_tested = build_geographic_workbook(genes, allele_seq, alleles_by_group, out_dir / "D_Region_Konsensus_Cografi.xlsx")
-    print(f"      {n_sig} / {n_tested} D geni, alel bilesiminde cografyaya gore ISTATISTIKSEL OLARAK ANLAMLI fark gosteriyor.")
+    n_sig, n_tested = build_geographic_workbook(
+        ordered_genes, allele_seq, alleles_by_group, rank_map, out_dir / "D_Region_Konsensus_Cografi.xlsx"
+    )
+    print(f"[5/5] {n_sig} / {n_tested} D geni, alel bilesiminde cografyaya gore ISTATISTIKSEL OLARAK ANLAMLI fark gosteriyor.")
 
     print("[4/4] Tamamlandi.")
     print(f"Yazildi: {out_dir}/D_Region_Konsensus_TumInsanlar.xlsx ve {out_dir}/D_Region_Konsensus_Cografi.xlsx")
