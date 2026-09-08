@@ -58,6 +58,7 @@ from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_r
 
 FONT = "Arial"
 ALPHA = 0.05
+NULL_P = 0.25  # chance of any one base at a position under "no real consensus"
 
 
 def haplotype_alleles_per_gene(cohort_by_gene: dict, genes: list[str]) -> dict[str, list[str]]:
@@ -88,12 +89,16 @@ def consensus_for_dominant_length(sequences: list[str]) -> dict:
 
     consensus_chars = []
     match_fracs = []
+    position_pvalues = []
     for pos in range(max_length):
         counts = Counter(s[pos] for s in sequences if len(s) > pos)
         base, count = counts.most_common(1)[0]
         n_at_pos = sum(counts.values())
         consensus_chars.append(base)
         match_fracs.append(count / n_at_pos)
+        # is the majority base at this position over-represented versus the
+        # "no real consensus" null of 25% per base (4 possible bases)?
+        position_pvalues.append(stats.binomtest(count, n_at_pos, NULL_P, alternative="greater").pvalue)
     # report the consensus at the modal length (the length most people
     # actually have) - positions beyond it belong to longer minority variants
     consensus = "".join(consensus_chars[:modal_length])
@@ -107,30 +112,46 @@ def consensus_for_dominant_length(sequences: list[str]) -> dict:
         "consensus": consensus,
         "exact_match_pct": exact_matches / len(sequences),
         "min_position_agreement": min(match_fracs[:modal_length]),
+        "max_position_pvalue": max(position_pvalues[:modal_length]),
     }
 
 
 def build_pooled_workbook(
     genes: list[str], allele_seq: dict, alleles_all: dict[str, list[str]], rank_map: dict[str, int], out_path: Path
 ):
+    # pass 1: compute every gene's consensus stats first, so the "is this
+    # consensus real or could it be chance" p-values can be BH-corrected
+    # across all genes before anything is written to the sheet
+    stats_by_gene = {}
+    for gene in genes:
+        seqs = [allele_seq[a] for a in alleles_all[gene] if a in allele_seq]
+        if seqs:
+            stats_by_gene[gene] = consensus_for_dominant_length(seqs)
+
+    tested_genes = list(stats_by_gene.keys())
+    p_adj = _benjamini_hochberg(np.array([stats_by_gene[g]["max_position_pvalue"] for g in tested_genes])) if tested_genes else []
+    p_adj_map = dict(zip(tested_genes, p_adj))
+
     wb = Workbook()
     ws = wb.active
     ws.title = "D_REGION_TumInsanlar"
 
-    ws.merge_cells("A1:I1")
+    ws.merge_cells("A1:J1")
     ws["A1"] = "D Segmenti (D-REGION) Konsensus Dizisi - SARP/VDJ-Katilim Sirasina Gore, Tum Orneklem"
     ws["A1"].font = Font(name=FONT, size=13, bold=True)
-    ws.merge_cells("A2:I2")
+    ws.merge_cells("A2:J2")
     ws["A2"] = (
         "Sira = o D geninin SARP skoruna gore final VDJ'ye katilma ihtimali sirasi (1=en yuksek; bu sira "
         "herkeste ayni, cunku RSS herkeste ayni - bkz. onceki analiz). O siradaki genin TUM gercek "
         "bireylerin (~2472 kisi, haplotip bazinda) D-REGION dizileri, uzunluk farki gozetmeksizin "
-        "hepsi ust uste konup pozisyon pozisyon konsensus cikarildi - nadir farkli-uzunluktaki "
-        "(indel) gozlemler elenmedi, kendiliginden azinlikta kalip oy kaybetti."
+        "hepsi ust uste konup pozisyon pozisyon konsensus cikarildi. '*' = konsensusun rastgele "
+        "(pozisyon basina %25 sans) olusma ihtimaline karsi istatistiksel olarak anlamli oldugu "
+        "(BH-duzeltmeli binom testi, p<0.05) genler - bu, COGRAFI FARK degil, konsensusun "
+        "GERCEK/SABIT bir ozellik olup olmadigini olcer."
     )
     ws["A2"].font = Font(name=FONT, size=9, italic=True, color="595959")
 
-    headers = ["Sira", "D Geni", "Konsensus D-REGION", "Uzunluk (nt)", "Bu Uzunlukta N", "Toplam N", "Farkli Uzunluk Sayisi", "Tam Eslesme %", "En Dusuk Pozisyon Uyum %"]
+    headers = ["Sira", "D Geni", "Konsensus D-REGION", "Uzunluk (nt)", "Bu Uzunlukta N", "Toplam N", "Farkli Uzunluk Sayisi", "Tam Eslesme %", "En Dusuk Pozisyon Uyum %", "Anlamli mi (p<0.05)"]
     for c, h in enumerate(headers, start=1):
         cell = ws.cell(row=4, column=c, value=h)
         cell.font = Font(name=FONT, size=10, bold=True, color="FFFFFF")
@@ -140,13 +161,14 @@ def build_pooled_workbook(
     r = 5
     for gene in genes:
         ws.cell(row=r, column=1, value=rank_map.get(gene, "-")).alignment = Alignment(horizontal="center")
-        seqs = [allele_seq[a] for a in alleles_all[gene] if a in allele_seq]
-        if not seqs:
+        stat = stats_by_gene.get(gene)
+        if stat is None:
             ws.cell(row=r, column=2, value=gene).font = Font(name=FONT, bold=True)
             ws.cell(row=r, column=3, value="veri yok").font = Font(name=FONT, italic=True, color="808080")
             r += 1
             continue
-        stat = consensus_for_dominant_length(seqs)
+        p_adj_val = p_adj_map[gene]
+        is_sig = p_adj_val < ALPHA
         vals = [
             gene,
             stat["consensus"],
@@ -156,19 +178,28 @@ def build_pooled_workbook(
             stat["n_distinct_lengths"],
             f"{stat['exact_match_pct'] * 100:.1f}%",
             f"{stat['min_position_agreement'] * 100:.1f}%",
+            "EVET *" if is_sig else "hayir",
         ]
         for c, v in enumerate(vals, start=2):
             cell = ws.cell(row=r, column=c, value=v)
             cell.alignment = Alignment(horizontal="center")
             if c == 2:
                 cell.font = Font(name=FONT, bold=True)
+            if c == 10 and is_sig:
+                cell.font = Font(name=FONT, bold=True, color="1F6B2C")
         r += 1
 
-    for i, w in enumerate([6, 12, 24, 12, 14, 12, 12, 14, 18], start=1):
+    n_sig = sum(1 for g in tested_genes if p_adj_map[g] < ALPHA)
+    ws.cell(row=r + 1, column=1, value=f"Anlamli konsensus sayisi: {n_sig} / {len(tested_genes)} test edilen").font = Font(
+        name=FONT, size=10, italic=True
+    )
+
+    for i, w in enumerate([6, 12, 24, 12, 14, 12, 12, 14, 18, 16], start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A5"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
+    return n_sig, len(tested_genes)
 
 
 def build_geographic_workbook(
@@ -312,7 +343,10 @@ def main():
 
     print("[3/5] Tum gercek bireyler icin D-REGION konsensusu (havuzlanmis, SARP sirasina gore)...")
     alleles_all = haplotype_alleles_per_gene(all_cohort, genes)
-    build_pooled_workbook(ordered_genes, allele_seq, alleles_all, rank_map, out_dir / "D_Region_Konsensus_TumInsanlar.xlsx")
+    n_sig_pooled, n_tested_pooled = build_pooled_workbook(
+        ordered_genes, allele_seq, alleles_all, rank_map, out_dir / "D_Region_Konsensus_TumInsanlar.xlsx"
+    )
+    print(f"      {n_sig_pooled} / {n_tested_pooled} D geninin konsensusu rastgeleye karsi ISTATISTIKSEL OLARAK ANLAMLI (BH p<0.05).")
 
     print(f"[4/5] Cografi kohortlar (gercek {args.n_per_group} kisi/grup) icin alel frekansi ki-kare testi...")
     geo_cohorts = build_group_cohorts(d_rows, genes, n_per_group=args.n_per_group, seed=args.seed)
