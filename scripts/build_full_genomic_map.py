@@ -34,10 +34,18 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from scripts.build_d_segment_map import CANONICAL_GENES
+from scripts.build_d_segment_map import CANONICAL_GENES as _FAMILY_GROUPED_GENES
 from vdj_bias.kiarva_genotypes import build_rss_reference_table, load_d_gene_rows
 from vdj_bias.sarp_scores import load_sarp_scores
 from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_rss_table
+
+# true genomic order: sorted by the gene's own position number (the part
+# after the dash), NOT grouped by family. This is what actually goes
+# 1,2,3,...,27 along the chromosome - families interleave (IGHD1-1,
+# IGHD2-2, IGHD3-3, IGHD4-4, IGHD5-5, IGHD6-6, IGHD1-7, IGHD2-8, ...)
+# because the D locus is built from repeated 6-gene (families 1-6)
+# cassettes, with the single family-7 gene at the very end.
+GENOMIC_ORDER_GENES = sorted(_FAMILY_GROUPED_GENES, key=lambda g: int(g.split("-")[1]))
 
 FONT = "Arial"
 MAX_ALLELE_ROWS = 4  # the most alleles any single gene has in this sample (IGHD2-2)
@@ -119,7 +127,7 @@ def main():
 
     print("[2/3] Her pozisyon icin RSS + alel siralamasi hesaplaniyor...")
     gene_data = {}
-    for gene in CANONICAL_GENES:
+    for gene in GENOMIC_ORDER_GENES:
         rss_info = gene_rss_info(gene, rss_ref, sarp_scores)
         alleles = gene_allele_ranking(gene, d_rows)
         gene_data[gene] = {"rss": rss_info, "alleles": alleles}
@@ -152,7 +160,7 @@ def main():
     gap_fill = PatternFill("solid", fgColor="FFFFFF")
 
     col = 1
-    for gene in CANONICAL_GENES:
+    for gene in GENOMIC_ORDER_GENES:
         data = gene_data[gene]
         rss5_seq, rss5_sarp = data["rss"]["5"]
         rss3_seq, rss3_sarp = data["rss"]["3"]
