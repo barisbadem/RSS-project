@@ -15,9 +15,14 @@ Sequence lookup is keyed by (gene, base_allele) rather than the allele's
 own db_name, because some near-identical duplicated genes (e.g. IGHD4-4 /
 IGHD4-11) only get resolved to a clean single-gene name in the longer
 flank-extended reads - their plain short reads carry an ambiguous
-compound name like "IGHD4-11*01/IGHD4-4*01". A handful of rare alleles
-that were only ever seen in a flank-extended read (never their own short
-call) are marked as such rather than guessing their exact core boundary.
+compound name like "IGHD4-11*01/IGHD4-4*01" (gene column filed only under
+one of the two names). For those, the sequence is recovered from that
+compound short-read call and flagged "belirsiz bileşik çağrı" - it is a
+real, correct D-REGION sequence, just shared between two near-identical
+genes that this dataset's short reads can't distinguish on their own. A
+true handful of alleles with no short-read call under any name (own or
+compound) are marked as such rather than guessing their exact core
+boundary from the long read alone.
 
 Usage:
     python scripts/build_all_alleles_list.py [--cache-dir .cache] [--out results/Tum_Alleller_Listesi.xlsx]
@@ -38,6 +43,7 @@ from vdj_bias.kiarva_genotypes import load_d_gene_rows
 
 FONT = "Arial"
 NOT_FOUND_LABEL = "(sadece uzun okumada mevcut, cekirdek ayri cikarilamadi)"
+AMBIGUOUS_SUFFIX = " [belirsiz bilesik cagridan alindi]"
 
 # standard genetic code (DNA codon -> single-letter amino acid, "*" = stop)
 CODON_TABLE = {
@@ -84,6 +90,16 @@ def main():
     for gene, base_allele, seq in zip(short_rows["gene"], short_rows["base_allele"], short_rows["sequence"]):
         core_seq_by_gene_allele.setdefault((gene, base_allele), seq)
 
+    # fallback for genes that only ever get a short-read call bundled into
+    # an ambiguous compound name (e.g. base_db_name "IGHD4-11*01/IGHD4-4*01"
+    # filed under gene column "IGHD4-4"): split every compound short-read
+    # call on "/" and index each component name ("IGHD4-11*01") on its own,
+    # so a lookup for (gene="IGHD4-11", base_allele="01") still finds it.
+    component_seq: dict[str, str] = {}
+    for base_db_name, seq in zip(short_rows["base_db_name"], short_rows["sequence"]):
+        for part in base_db_name.split("/"):
+            component_seq.setdefault(part, seq)
+
     combos = d_rows[["gene", "base_allele", "base_db_name"]].drop_duplicates()
     counts_short = short_rows.groupby("base_db_name").size()
     counts_long = d_rows[d_rows["is_long"]].groupby("base_db_name").size()
@@ -91,7 +107,10 @@ def main():
     rows = []
     for _, row in combos.iterrows():
         gene, base_allele, base_db_name = row["gene"], row["base_allele"], row["base_db_name"]
-        seq = core_seq_by_gene_allele.get((gene, base_allele), NOT_FOUND_LABEL)
+        seq = core_seq_by_gene_allele.get((gene, base_allele))
+        if seq is None:
+            fallback = component_seq.get(f"{gene}*{base_allele}")
+            seq = fallback + AMBIGUOUS_SUFFIX if fallback else NOT_FOUND_LABEL
         rows.append(
             (gene, base_db_name, seq, int(counts_short.get(base_db_name, 0)), int(counts_long.get(base_db_name, 0)))
         )
@@ -130,15 +149,20 @@ def main():
     r = 5
     for gene, allele, seq, n_short, n_long in rows:
         has_seq = seq != NOT_FOUND_LABEL
-        frames = [translate_frame(seq, f) for f in range(3)] if has_seq else ["-", "-", "-"]
+        is_ambiguous = has_seq and seq.endswith(AMBIGUOUS_SUFFIX)
+        pure_seq = seq[: -len(AMBIGUOUS_SUFFIX)] if is_ambiguous else seq
+        frames = [translate_frame(pure_seq, f) for f in range(3)] if has_seq else ["-", "-", "-"]
         vals = [gene, allele, seq, n_short, n_long, frames[0], frames[1], frames[2]]
         for c, v in enumerate(vals, start=1):
             cell = ws.cell(row=r, column=c, value=v)
             cell.alignment = Alignment(horizontal="center" if c not in (3, 6, 7, 8) else "left")
             if c == 1:
                 cell.font = Font(name=FONT, bold=True)
-            if c == 3 and v == NOT_FOUND_LABEL:
-                cell.font = Font(name=FONT, italic=True, color="808080")
+            if c == 3:
+                if v == NOT_FOUND_LABEL:
+                    cell.font = Font(name=FONT, italic=True, color="808080")
+                elif is_ambiguous:
+                    cell.font = Font(name=FONT, italic=True, color="8A6D00")
             if c in (6, 7, 8):
                 if has_seq and "*" in v:
                     cell.font = Font(name=FONT, color="C0392B")

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import io
 import random
+import re
 import zipfile
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -76,9 +77,23 @@ def _parse_case(case: str) -> tuple[str, str, str]:
     return sample_id, subpop, superpop
 
 
+_FLANK_SUFFIX_RE = re.compile(r"_F\d+$")
+
+
 def _strip_variant_suffix(allele_or_db_name: str) -> str:
-    """'01_F1' -> '01', 'IGHD3-10*01_F1' -> 'IGHD3-10*01'."""
-    return allele_or_db_name.split("_")[0]
+    """Strip only the trailing flank-extension marker ('_F1', '_F2', ...):
+    '01_F1' -> '01', 'IGHD3-10*01_F1' -> 'IGHD3-10*01'.
+
+    Some allele/db names also carry an earlier, unrelated underscore tag
+    identifying the specific sample a novel/rare allele was first called in
+    (e.g. '04_S0329', 'IGHD2-2*04_S0329') - this is part of the allele's own
+    identity, not a flank marker, and must be left in place so a naive
+    `.split('_')[0]` doesn't (a) collapse it away and (b) wrongly mark the
+    plain short read '04_S0329' as "long" just because it contains an
+    underscore. Only a real flank-extended read ends in '_F<digits>'; its
+    short-read counterpart ('04_S0329_F1' -> '04_S0329') still matches
+    correctly with this stricter rule."""
+    return _FLANK_SUFFIX_RE.sub("", allele_or_db_name)
 
 
 def load_d_gene_rows(cache_dir: Path) -> pd.DataFrame:
