@@ -245,22 +245,16 @@ def build_summary_sheet(wb, gene_stats: list[dict]):
     ws.freeze_panes = "A5"
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--cache-dir", default=".cache")
-    ap.add_argument("--out", default="results/Anlamli_Allel_Cografyasi.xlsx")
-    ap.add_argument("--n-per-group", type=int, default=410)
-    ap.add_argument("--seed", type=int, default=42)
-    args = ap.parse_args()
-
-    cache_dir = Path(args.cache_dir)
-    print("[1/3] Cografi kohortlar olusturuluyor...")
+def compute_significant_gene_results(cache_dir: Path, n_per_group: int = 410, seed: int = 42):
+    """Single source of truth for 'which genes are geographically significant
+    and what exactly their contingency table looks like' - shared by the
+    Excel workbook and the GraphPad Prism export, so both always show
+    identical numbers. Returns (sig_genes, gene_results, p_adj_map)."""
     d_rows = load_d_gene_rows(cache_dir / "kiarva_genotypes")
     genes = sorted(d_rows["gene"].unique())
-    geo_cohorts = build_group_cohorts(d_rows, genes, n_per_group=args.n_per_group, seed=args.seed)
+    geo_cohorts = build_group_cohorts(d_rows, genes, n_per_group=n_per_group, seed=seed)
     alleles_by_group = {g: haplotype_alleles_per_gene(geo_cohorts[g], genes) for g in GROUPS}
 
-    print("[2/3] Her gen icin ki-kare testi hesaplaniyor...")
     gene_results = {}
     for gene in genes:
         allele_names = set()
@@ -291,6 +285,20 @@ def main():
     p_adj_map = dict(zip(tested, p_adj))
     sig_genes = [g for g in tested if p_adj_map[g] < ALPHA]
     sig_genes.sort(key=lambda g: p_adj_map[g])
+    return sig_genes, gene_results, p_adj_map
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cache-dir", default=".cache")
+    ap.add_argument("--out", default="results/Anlamli_Allel_Cografyasi.xlsx")
+    ap.add_argument("--n-per-group", type=int, default=410)
+    ap.add_argument("--seed", type=int, default=42)
+    args = ap.parse_args()
+
+    cache_dir = Path(args.cache_dir)
+    print("[1/3] Cografi kohortlar olusturuluyor ve ki-kare testleri hesaplaniyor...")
+    sig_genes, gene_results, p_adj_map = compute_significant_gene_results(cache_dir, args.n_per_group, args.seed)
     print(f"      {len(sig_genes)} anlamli gen: {', '.join(sig_genes)}")
 
     print("[3/3] Excel yaziliyor (istatistik tablolari + alel-basi grafikler)...")
