@@ -127,19 +127,53 @@ def load_d_gene_rows(cache_dir: Path) -> pd.DataFrame:
 def build_core_sequence_lookup(d_rows: pd.DataFrame) -> dict[tuple[str, str], str]:
     """{(gene, base_allele): D-REGION coding sequence} - the actual D segment
     itself (NOT the flanking RSS), one real observed sequence per named
-    allele. Source: the plain short rows (allele has no '_F1'-style suffix)."""
+    allele. Source: the plain short rows (allele has no '_F1'-style suffix).
+
+    Some genes (e.g. IGHD4-17) never get their own clean short-read call at
+    all - their only short row is filed under an ambiguous compound name
+    (e.g. base_db_name "IGHD4-17*01/IGHD4-4*01_S0251") because two
+    near-identical genes share the same short D-REGION core and can't be
+    told apart at that read length. That core sequence is still real and
+    correct for BOTH named genes, so it's also indexed under each
+    component's own (gene, allele) pair - without this, a gene like
+    IGHD4-17 would have no core to anchor its RSS flank extraction on at
+    all, not just a degraded one."""
     core_seq: dict[tuple[str, str], str] = {}
     short_rows = d_rows[~d_rows["is_long"]]
-    for gene, base_allele, seq in zip(short_rows["gene"], short_rows["base_allele"], short_rows["sequence"]):
+    for gene, base_allele, base_db_name, seq in zip(
+        short_rows["gene"], short_rows["base_allele"], short_rows["base_db_name"], short_rows["sequence"]
+    ):
         core_seq.setdefault((gene, base_allele), seq)
+        for component in base_db_name.split("/"):
+            if "*" not in component:
+                continue
+            comp_gene, comp_allele = component.split("*", 1)
+            core_seq.setdefault((comp_gene, comp_allele), seq)
     return core_seq
+
+
+_COMPLEMENT = str.maketrans("ACGT", "TGCA")
+
+
+def _reverse_complement(seq: str) -> str:
+    return seq.translate(_COMPLEMENT)[::-1]
 
 
 def _extract_raw_rss_rows(d_rows: pd.DataFrame) -> pd.DataFrame:
     """One row per real, individual flank-extended read that yields a valid
     CAC-starting 9-mer: case, gene, allele (IMGT-style base_db_name), side,
     rss9mer. This is the un-aggregated, per-person ground truth - nothing is
-    collapsed to a majority/consensus value here."""
+    collapsed to a majority/consensus value here.
+
+    A handful of D genes (verified: IGHD4-4, IGHD4-23, IGHD5-12) are
+    annotated on the opposite genomic strand from most others in this file -
+    their captured 5' flank is the reverse complement of the true
+    (V-proximal) RSS, so the normal swapped-order formula never produces a
+    CAC-starting 9-mer for them (0% match, not noise - confirmed by checking
+    every real observation). For any 5' flank that fails the forward
+    formula, we also try the reverse complement of the raw last-9 flank
+    bases before giving up; this recovers those genes' real 5' RSS instead
+    of silently reporting them as having no data."""
     core_seq = build_core_sequence_lookup(d_rows)
 
     rows = []
@@ -160,6 +194,10 @@ def _extract_raw_rss_rows(d_rows: pd.DataFrame) -> pd.DataFrame:
                 rows.append({"case": case, "gene": gene, "allele": base_db_name, "side": "3", "rss9mer": mer3})
         if len(prefix) >= 9:
             mer5 = prefix[-7:] + prefix[-9:-7]
+            if not mer5.startswith("CAC"):
+                revcomp_candidate = _reverse_complement(prefix[-9:])
+                if revcomp_candidate.startswith("CAC"):
+                    mer5 = revcomp_candidate
             if mer5.startswith("CAC"):
                 rows.append({"case": case, "gene": gene, "allele": base_db_name, "side": "5", "rss9mer": mer5})
 
