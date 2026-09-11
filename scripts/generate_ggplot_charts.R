@@ -3,8 +3,8 @@
 #
 # DATA SOURCE: raw observed haplotype counts from our own analysis of
 # KIARVA's real, public 1000 Genomes IGHD genotype data (CC BY-NC 4.0). NOT
-# copied from any published article. Same counts as our Excel workbook and
-# GraphPad Prism export (single source, cross-checked).
+# copied from any published article. Same counts as the accompanying Excel
+# workbook and GraphPad Prism export (single source, cross-checked).
 #
 # Everything below this one raw table is COMPUTED, not restated: R itself
 # builds the per-gene contingency tables, runs the chi-square test of
@@ -147,8 +147,6 @@ raw_long <- read.csv(text = raw_csv, stringsAsFactors = FALSE)
 gene_order <- unique(raw_long$gene)
 raw_long$gene   <- factor(raw_long$gene, levels = gene_order)
 raw_long$region <- factor(raw_long$region, levels = c("Africa", "Europe", "Asia"))
-region_tr <- c(Africa = "Afrika", Europe = "Avrupa", Asia = "Asya")
-raw_long$region_label <- factor(region_tr[as.character(raw_long$region)], levels = region_tr)
 
 # ---- 2) percentages + 95% Wilson confidence intervals (base R, no extra pkg) ----
 totals <- aggregate(count ~ gene + region, data = raw_long, sum)
@@ -176,12 +174,20 @@ chi_results <- do.call(rbind, lapply(split(raw_long, raw_long$gene), function(su
 }))
 chi_results$p_BH <- p.adjust(chi_results$p_raw, method = "BH")
 chi_results <- chi_results[order(chi_results$p_BH), ]
-cat("\n==== Ki-kare testi, TUM 16 test edilen gen (BH duzeltmesi bu tam kumeye gore) ====\n")
+cat("\n==== Chi-square test, ALL 16 tested genes (BH correction over this full set) ====\n")
 print(chi_results, row.names = FALSE)
 
 sig_genes <- as.character(chi_results$gene[chi_results$p_BH < 0.05])
-cat(sprintf("\n%d / %d gen istatistiksel olarak anlamli (BH p<0.05): %s\n",
+cat(sprintf("\n%d / %d genes statistically significant (BH p<0.05): %s\n",
             length(sig_genes), nrow(chi_results), paste(sig_genes, collapse = ", ")))
+
+# for PLOTTING ORDER only (the stats table above stays sorted by
+# significance): group genes by IGHD family number (the digit right after
+# "IGHD", e.g. IGHD4-4 and IGHD4-23 are both family 4) so family-mates are
+# plotted next to each other, then by position number within a family
+family_num   <- as.integer(sub("^IGHD(\\d+)-.*$", "\\1", sig_genes))
+position_num <- as.integer(sub("^IGHD\\d+-(\\d+).*$", "\\1", sig_genes))
+sig_genes_plot_order <- sig_genes[order(family_num, position_num)]
 
 # ---- 4) GraphPad Prism-style theme ------------------------------------------
 theme_prism <- theme_bw(base_size = 12) +
@@ -200,54 +206,26 @@ theme_prism <- theme_bw(base_size = 12) +
     text             = element_text(family = "sans")
   )
 
-region_colors <- c(Afrika = "#2A78D6", Avrupa = "#EB6834", Asya = "#1BAF7A")
+region_colors <- c(Africa = "#2A78D6", Europe = "#EB6834", Asia = "#1BAF7A")
 
-# ---- 5) ONE combined figure, all significant genes' alleles side by side in
-#         a single grid (not one stacked figure per gene) - every allele
-#         still keeps its own separate panel (3 bars), just laid out
-#         together instead of printed as 7 separate plots -------------------
-sig_data <- subset(raw_long, gene %in% sig_genes)
-sig_data$gene <- factor(as.character(sig_data$gene), levels = as.character(sig_genes))
+# ---- 5) one figure per SIGNIFICANT gene, one facet panel per allele (never
+#         combined into a single set of bars - each allele keeps its own
+#         separate panel). Printed in family order (see sig_genes_plot_order
+#         above) so family-mates (e.g. IGHD4-4, IGHD4-23) appear back to back.
+for (g in sig_genes_plot_order) {
+  sub  <- subset(raw_long, gene == g)
+  stat <- subset(chi_results, gene == g)
+  subtitle <- sprintf("Chi-square test (recomputed from this data in R): chi2=%.2f, df=%d\nraw p=%.2e, BH-adjusted p=%.2e (SIGNIFICANT *)",
+                       stat$chi2, stat$df, stat$p_raw, stat$p_BH)
 
-# order alleles within each gene by their own max frequency (most-common
-# allele's panel first), keep genes grouped together and in significance order
-allele_order <- unlist(lapply(sig_genes, function(g) {
-  sub <- subset(sig_data, gene == g)
-  ord <- aggregate(pct ~ allele, data = sub, max)
-  ord <- ord[order(-ord$pct), ]
-  as.character(ord$allele)
-}))
-sig_data$allele <- factor(as.character(sig_data$allele), levels = allele_order)
+  p <- ggplot(sub, aes(x = region, y = pct, fill = region)) +
+    geom_col(width = 0.65, color = "black", size = 0.3) +
+    geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2, size = 0.4, color = "black") +
+    facet_wrap(~ allele) +
+    scale_fill_manual(values = region_colors) +
+    scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.08))) +
+    labs(title = as.character(g), subtitle = subtitle, x = NULL, y = "Allele frequency (%)") +
+    theme_prism
 
-# build the gene->allele panel order explicitly (keeps genes grouped, most
-# frequent allele first within each gene)
-panel_order <- character(0)
-for (g in sig_genes) {
-  al <- allele_order[allele_order %in% as.character(subset(sig_data, gene == g)$allele)]
-  panel_order <- c(panel_order, paste0(as.character(g), "\n", al))
+  print(p)
 }
-sig_data$panel_label <- factor(paste0(as.character(sig_data$gene), "\n", as.character(sig_data$allele)),
-                                levels = unique(panel_order))
-
-n_panels <- nlevels(sig_data$panel_label)
-n_col <- 7  # how many allele-panels per row before wrapping to the next row
-
-combined_title <- "Cografyaya Gore Istatistiksel Olarak Anlamli D Genlerinin Alel Sikligi"
-combined_subtitle <- paste(
-  sprintf("%s (chi2=%.1f, BH-p=%.1e)", sig_genes,
-          chi_results$chi2[match(sig_genes, chi_results$gene)],
-          chi_results$p_BH[match(sig_genes, chi_results$gene)]),
-  collapse = "  |  "
-)
-
-p_all <- ggplot(sig_data, aes(x = region_label, y = pct, fill = region_label)) +
-  geom_col(width = 0.65, color = "black", size = 0.3) +
-  geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2, size = 0.4, color = "black") +
-  facet_wrap(~ panel_label, ncol = n_col) +
-  scale_fill_manual(values = region_colors) +
-  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.08))) +
-  labs(title = combined_title, subtitle = combined_subtitle, x = NULL, y = "Alel sikligi (%)") +
-  theme_prism +
-  theme(plot.subtitle = element_text(size = 7.5))
-
-print(p_all)
