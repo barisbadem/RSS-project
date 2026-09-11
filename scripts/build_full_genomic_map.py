@@ -4,16 +4,20 @@ The full requested map: all 27 D genes in real genomic (position) order,
 with the real, fixed (same-in-everyone) RSS sequence written on each side
 of every gene - SARP score directly above each RSS sequence - and, in the
 gene's own slot, every real D-REGION allele observed in the sample, stacked
-from most to least frequent (a gene with only one known allele just shows
-that one sequence).
+from most to least frequent. Each allele now shows its DNA sequence AND its
+translation in all 3 reading frames (RF1/RF2/RF3), one line each, directly
+under that allele - not just the raw sequence.
 
 Layout per gene (columns, left to right): [5' RSS] [D-REGION alleles] [3' RSS]
   row: gene name (merged over the block)
   row: 5' SARP score | (header) | 3' SARP score
-  row: 5' RSS 9-mer  | allele #1 (most frequent): name, sequence, freq%
-  row: (merged down)  | allele #2 ...
-  row: (merged down)  | allele #3 ...
-  row: (merged down)  | allele #4 ...
+  row: 5' RSS 9-mer  | allele #1 (most frequent): name (freq%, n=)
+  row: (merged down)  |   DNA: <sequence>
+  row: (merged down)  |   RF1: <amino acids>
+  row: (merged down)  |   RF2: <amino acids>
+  row: (merged down)  |   RF3: <amino acids>
+  row: (merged down)  | allele #2: ... (same 4 sub-rows)
+  ... up to the gene with the most real alleles in the sample
 A one-column gap separates each gene's block from the next, mirroring the
 genomic layout.
 
@@ -34,6 +38,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from scripts.build_all_alleles_list import NOT_FOUND_LABEL, translate_frame
 from scripts.build_d_segment_map import CANONICAL_GENES as _FAMILY_GROUPED_GENES
 from vdj_bias.kiarva_genotypes import build_rss_reference_table, load_d_gene_rows
 from vdj_bias.sarp_scores import load_sarp_scores
@@ -48,7 +53,7 @@ from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_r
 GENOMIC_ORDER_GENES = sorted(_FAMILY_GROUPED_GENES, key=lambda g: int(g.split("-")[1]))
 
 FONT = "Arial"
-MAX_ALLELE_ROWS = 4  # the most alleles any single gene has in this sample (IGHD2-2)
+LINES_PER_ALLELE = 4  # DNA, RF1, RF2, RF3
 
 
 def gene_rss_info(gene: str, rss_ref: pd.DataFrame, sarp_scores: pd.DataFrame) -> dict:
@@ -104,7 +109,7 @@ def gene_allele_ranking(gene: str, d_rows: pd.DataFrame) -> list[tuple[str, str,
     ranked = sorted(counts.items(), key=lambda kv: -kv[1])
     out = []
     for name, count in ranked:
-        seq = short_seq_lookup.get(name) or long_seq_lookup.get(name) or "cikarilamadi"
+        seq = short_seq_lookup.get(name) or long_seq_lookup.get(name) or NOT_FOUND_LABEL
         out.append((name, seq, count / total, count))
     return out
 
@@ -127,10 +132,13 @@ def main():
 
     print("[2/3] Her pozisyon icin RSS + alel siralamasi hesaplaniyor...")
     gene_data = {}
+    max_alleles = 1
     for gene in GENOMIC_ORDER_GENES:
         rss_info = gene_rss_info(gene, rss_ref, sarp_scores)
         alleles = gene_allele_ranking(gene, d_rows)
         gene_data[gene] = {"rss": rss_info, "alleles": alleles}
+        max_alleles = max(max_alleles, len(alleles))
+    print(f"      Bir genin sahip oldugu en fazla gercek alel sayisi: {max_alleles}")
 
     print("[3/3] Excel yaziliyor...")
     wb = Workbook()
@@ -140,16 +148,18 @@ def main():
     GENE_ROW = 4
     SARP_ROW = 5
     ALLELE_START_ROW = 6
-    ALLELE_END_ROW = ALLELE_START_ROW + MAX_ALLELE_ROWS - 1
+    ALLELE_BLOCK_ROWS = max_alleles * LINES_PER_ALLELE
+    ALLELE_END_ROW = ALLELE_START_ROW + ALLELE_BLOCK_ROWS - 1
 
     ws.merge_cells("A1:F1")
-    ws["A1"] = "Tam Genomik Harita: 27 D Geni, RSS Dizileri (SARP Skoruyla) ve D-REGION Alel Siralamasi"
+    ws["A1"] = "Tam Genomik Harita: 27 D Geni, RSS Dizileri (SARP Skoruyla) ve D-REGION Alel Siralamasi + 3 Cerceve Cevirisi"
     ws["A1"].font = Font(name=FONT, size=13, bold=True)
     ws.merge_cells("A2:F2")
     ws["A2"] = (
         "Her genin iki yaninda gercek, herkeste ayni RSS 9-meri (uzerinde SARP skoru). Gen kutusunda, "
-        "o pozisyonun gercek D-REGION alelleri en sik gorulenden en az gorulene siralanmis (yuzde ile). "
-        "Tek alel varsa sadece o dizi yazili."
+        "o pozisyonun gercek D-REGION alelleri en sik gorulenden en az gorulene siralanmis (yuzde ile); "
+        "her alelin altinda DNA dizisi ve RF1/RF2/RF3 (3 okuma cercevesi) amino asit cevirisi var. "
+        "'*' = dur kodonu (kirmizi renkli)."
     )
     ws["A2"].font = Font(name=FONT, size=9, italic=True, color="595959")
 
@@ -177,12 +187,12 @@ def main():
 
         # SARP scores (above the RSS sequences)
         ws.cell(row=SARP_ROW, column=c_5, value=round(rss5_sarp, 4) if rss5_sarp is not None else "veri yok").font = sarp_font
-        ws.cell(row=SARP_ROW, column=c_gene, value="D-REGION Alelleri").font = Font(name=FONT, size=8, italic=True, bold=True)
+        ws.cell(row=SARP_ROW, column=c_gene, value="D-REGION Alelleri (+3 Cerceve)").font = Font(name=FONT, size=8, italic=True, bold=True)
         ws.cell(row=SARP_ROW, column=c_3, value=round(rss3_sarp, 4) if rss3_sarp is not None else "veri yok").font = sarp_font
         for cc in (c_5, c_gene, c_3):
             ws.cell(row=SARP_ROW, column=cc).alignment = Alignment(horizontal="center")
 
-        # RSS sequences, merged down across all allele rows (fixed/same value regardless of allele)
+        # RSS sequences, merged down across the whole allele block (fixed/same value regardless of allele)
         ws.merge_cells(start_row=ALLELE_START_ROW, start_column=c_5, end_row=ALLELE_END_ROW, end_column=c_5)
         rcell5 = ws.cell(row=ALLELE_START_ROW, column=c_5, value=rss5_seq if rss5_seq else "veri yok")
         rcell5.font = rss_font
@@ -193,19 +203,36 @@ def main():
         rcell3.font = rss_font
         rcell3.alignment = Alignment(horizontal="center", vertical="center")
 
-        # alleles stacked most -> least frequent
+        # alleles stacked most -> least frequent, each as 4 sub-rows: DNA/RF1/RF2/RF3
         if not alleles:
             ws.cell(row=ALLELE_START_ROW, column=c_gene, value="veri yok").font = Font(name=FONT, italic=True, color="808080")
-        for i in range(MAX_ALLELE_ROWS):
-            r = ALLELE_START_ROW + i
-            if i < len(alleles):
-                name, seq, freq, n = alleles[i]
-                cell = ws.cell(row=r, column=c_gene, value=f"{name}: {seq} ({freq*100:.1f}%, n={n})")
-                cell.font = Font(name=FONT, size=9, bold=(i == 0))
-                if i == 0:
-                    cell.fill = allele_fill_top
-            cell = ws.cell(row=r, column=c_gene)
-            cell.alignment = Alignment(horizontal="left", vertical="center")
+        for i in range(max_alleles):
+            base_r = ALLELE_START_ROW + i * LINES_PER_ALLELE
+            if i >= len(alleles):
+                continue
+            name, seq, freq, n = alleles[i]
+            has_seq = seq != NOT_FOUND_LABEL
+            frames = [translate_frame(seq, f) for f in range(3)] if has_seq else ["-", "-", "-"]
+
+            if i == 0:
+                for rr in range(base_r, base_r + LINES_PER_ALLELE):
+                    ws.cell(row=rr, column=c_gene).fill = allele_fill_top
+
+            lines = [
+                ("DNA", f"{name} ({freq*100:.1f}%, n={n})  DNA: {seq}"),
+                ("RF1", f"RF1: {frames[0]}"),
+                ("RF2", f"RF2: {frames[1]}"),
+                ("RF3", f"RF3: {frames[2]}"),
+            ]
+            for j, (label, text) in enumerate(lines):
+                rr = base_r + j
+                cell = ws.cell(row=rr, column=c_gene, value=text)
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+                if label == "DNA":
+                    cell.font = Font(name=FONT, size=9, bold=True)
+                else:
+                    is_stop = has_seq and "*" in text
+                    cell.font = Font(name=FONT, size=9, color="C0392B" if is_stop else "595959")
 
         for cc, w in ((c_5, 20), (c_gene, 46), (c_3, 20)):
             ws.column_dimensions[get_column_letter(cc)].width = w
