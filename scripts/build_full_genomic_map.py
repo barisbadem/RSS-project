@@ -121,7 +121,7 @@ def main():
     args = ap.parse_args()
 
     cache_dir = Path(args.cache_dir)
-    print("[1/3] Veriler yukleniyor...")
+    print("[1/3] Loading data...")
     d_rows = load_d_gene_rows(cache_dir / "kiarva_genotypes")
     sarp_scores = load_sarp_scores(cache_dir / "sarp")
     primary_rss = build_rss_reference_table(d_rows)
@@ -130,7 +130,7 @@ def main():
     extra = vdjbase_rss[~vdjbase_rss.apply(lambda r: (r["gene"], r["allele"], r["side"]) in have, axis=1)]
     rss_ref = pd.concat([primary_rss, extra], ignore_index=True)
 
-    print("[2/3] Her pozisyon icin RSS + alel siralamasi hesaplaniyor...")
+    print("[2/3] Computing RSS + allele ranking for each position...")
     gene_data = {}
     max_alleles = 1
     for gene in GENOMIC_ORDER_GENES:
@@ -138,9 +138,9 @@ def main():
         alleles = gene_allele_ranking(gene, d_rows)
         gene_data[gene] = {"rss": rss_info, "alleles": alleles}
         max_alleles = max(max_alleles, len(alleles))
-    print(f"      Bir genin sahip oldugu en fazla gercek alel sayisi: {max_alleles}")
+    print(f"      Highest number of real alleles for any single gene: {max_alleles}")
 
-    print("[3/3] Excel yaziliyor...")
+    print("[3/3] Writing Excel...")
     wb = Workbook()
     ws = wb.active
     ws.title = "Tam_Genomik_Harita"
@@ -152,14 +152,14 @@ def main():
     ALLELE_END_ROW = ALLELE_START_ROW + ALLELE_BLOCK_ROWS - 1
 
     ws.merge_cells("A1:F1")
-    ws["A1"] = "Tam Genomik Harita: 27 D Geni, RSS Dizileri (SARP Skoruyla) ve D-REGION Alel Siralamasi + 3 Cerceve Cevirisi"
+    ws["A1"] = "Full Genomic Map: 27 D Genes, RSS Sequences (with SARP Score) and D-REGION Allele Ranking + 3-Frame Translation"
     ws["A1"].font = Font(name=FONT, size=13, bold=True)
     ws.merge_cells("A2:F2")
     ws["A2"] = (
-        "Her genin iki yaninda gercek, herkeste ayni RSS 9-meri (uzerinde SARP skoru). Gen kutusunda, "
-        "o pozisyonun gercek D-REGION alelleri en sik gorulenden en az gorulene siralanmis (yuzde ile); "
-        "her alelin altinda DNA dizisi ve RF1/RF2/RF3 (3 okuma cercevesi) amino asit cevirisi var. "
-        "'*' = dur kodonu (kirmizi renkli)."
+        "Real, identical-in-everyone RSS 9-mer (with SARP score) on each side of every gene. In the gene's own "
+        "box, that position's real D-REGION alleles are ranked from most to least common (with percentage); "
+        "under each allele are its DNA sequence and its RF1/RF2/RF3 (3 reading frame) amino acid translation. "
+        "'*' = stop codon (shown in red)."
     )
     ws["A2"].font = Font(name=FONT, size=9, italic=True, color="595959")
 
@@ -186,26 +186,26 @@ def main():
         gcell.alignment = Alignment(horizontal="center")
 
         # SARP scores (above the RSS sequences)
-        ws.cell(row=SARP_ROW, column=c_5, value=round(rss5_sarp, 4) if rss5_sarp is not None else "veri yok").font = sarp_font
-        ws.cell(row=SARP_ROW, column=c_gene, value="D-REGION Alelleri (+3 Cerceve)").font = Font(name=FONT, size=8, italic=True, bold=True)
-        ws.cell(row=SARP_ROW, column=c_3, value=round(rss3_sarp, 4) if rss3_sarp is not None else "veri yok").font = sarp_font
+        ws.cell(row=SARP_ROW, column=c_5, value=round(rss5_sarp, 4) if rss5_sarp is not None else "no data").font = sarp_font
+        ws.cell(row=SARP_ROW, column=c_gene, value="D-REGION Alleles (+3 Frames)").font = Font(name=FONT, size=8, italic=True, bold=True)
+        ws.cell(row=SARP_ROW, column=c_3, value=round(rss3_sarp, 4) if rss3_sarp is not None else "no data").font = sarp_font
         for cc in (c_5, c_gene, c_3):
             ws.cell(row=SARP_ROW, column=cc).alignment = Alignment(horizontal="center")
 
         # RSS sequences, merged down across the whole allele block (fixed/same value regardless of allele)
         ws.merge_cells(start_row=ALLELE_START_ROW, start_column=c_5, end_row=ALLELE_END_ROW, end_column=c_5)
-        rcell5 = ws.cell(row=ALLELE_START_ROW, column=c_5, value=rss5_seq if rss5_seq else "veri yok")
+        rcell5 = ws.cell(row=ALLELE_START_ROW, column=c_5, value=rss5_seq if rss5_seq else "no data")
         rcell5.font = rss_font
         rcell5.alignment = Alignment(horizontal="center", vertical="center")
 
         ws.merge_cells(start_row=ALLELE_START_ROW, start_column=c_3, end_row=ALLELE_END_ROW, end_column=c_3)
-        rcell3 = ws.cell(row=ALLELE_START_ROW, column=c_3, value=rss3_seq if rss3_seq else "veri yok")
+        rcell3 = ws.cell(row=ALLELE_START_ROW, column=c_3, value=rss3_seq if rss3_seq else "no data")
         rcell3.font = rss_font
         rcell3.alignment = Alignment(horizontal="center", vertical="center")
 
         # alleles stacked most -> least frequent, each as 4 sub-rows: DNA/RF1/RF2/RF3
         if not alleles:
-            ws.cell(row=ALLELE_START_ROW, column=c_gene, value="veri yok").font = Font(name=FONT, italic=True, color="808080")
+            ws.cell(row=ALLELE_START_ROW, column=c_gene, value="no data").font = Font(name=FONT, italic=True, color="808080")
         for i in range(max_alleles):
             base_r = ALLELE_START_ROW + i * LINES_PER_ALLELE
             if i >= len(alleles):
@@ -249,7 +249,7 @@ def main():
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
-    print(f"Yazildi: {out_path}")
+    print(f"Written: {out_path}")
 
 
 if __name__ == "__main__":
