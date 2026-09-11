@@ -208,6 +208,13 @@ theme_prism <- theme_bw(base_size = 12) +
 
 region_colors <- c(Africa = "#2A78D6", Europe = "#EB6834", Asia = "#1BAF7A")
 
+# ---- 4b) where to save the HD figures. Saves into your current R working
+#          directory (see getwd() in the console, or Session > Set Working
+#          Directory > Choose Directory in RStudio to pick a folder first).
+out_dir <- "figures"
+dir.create(out_dir, showWarnings = FALSE)
+cat(sprintf("\nSaving figures into: %s\n", normalizePath(out_dir)))
+
 # ---- 5) one figure per SIGNIFICANT gene, one facet panel per allele (never
 #         combined into a single set of bars - each allele keeps its own
 #         separate panel). Printed in family order (see sig_genes_plot_order
@@ -228,4 +235,17 @@ for (g in sig_genes_plot_order) {
     theme_prism
 
   print(p)
+
+  n_allele_panels <- nlevels(factor(sub$allele))
+  fig_width <- max(6, 3 * n_allele_panels)  # widen for genes with more allele panels
+
+  # vector PDF - what most journals actually want, scales to any size with no quality loss
+  ggsave(file.path(out_dir, paste0(gsub("[/*]", "-", g), ".pdf")), plot = p,
+         width = fig_width, height = 5, units = "in")
+  # high-resolution TIFF as well, in case a raster format is required instead
+  ggsave(file.path(out_dir, paste0(gsub("[/*]", "-", g), ".tiff")), plot = p,
+         width = fig_width, height = 5, units = "in", dpi = 600, compression = "lzw")
 }
+
+cat(sprintf("\nDone - %d PDF + %d TIFF file(s) written to: %s\n",
+            length(sig_genes_plot_order), length(sig_genes_plot_order), normalizePath(out_dir)))
