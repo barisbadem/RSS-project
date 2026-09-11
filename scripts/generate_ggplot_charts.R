@@ -213,7 +213,9 @@ region_colors <- c(Africa = "#2A78D6", Europe = "#EB6834", Asia = "#1BAF7A")
 #          Directory > Choose Directory in RStudio to pick a folder first).
 out_dir <- "figures"
 dir.create(out_dir, showWarnings = FALSE)
-cat(sprintf("\nSaving figures into: %s\n", normalizePath(out_dir)))
+# (not using normalizePath() here - on Windows it can choke on non-ASCII
+# characters in the path, e.g. a OneDrive folder with Turkish letters)
+cat(sprintf("\nSaving figures into: %s/%s\n", getwd(), out_dir))
 
 # ---- 5) one figure per SIGNIFICANT gene, one facet panel per allele (never
 #         combined into a single set of bars - each allele keeps its own
@@ -247,5 +249,5 @@ for (g in sig_genes_plot_order) {
          width = fig_width, height = 5, units = "in", dpi = 600, compression = "lzw")
 }
 
-cat(sprintf("\nDone - %d PDF + %d TIFF file(s) written to: %s\n",
-            length(sig_genes_plot_order), length(sig_genes_plot_order), normalizePath(out_dir)))
+cat(sprintf("\nDone - %d PDF + %d TIFF file(s) written to: %s/%s\n",
+            length(sig_genes_plot_order), length(sig_genes_plot_order), getwd(), out_dir))
