@@ -170,7 +170,7 @@ raw_long$ci_high <- ci[, 2]
 chi_results <- do.call(rbind, lapply(split(raw_long, raw_long$gene), function(sub) {
   tab <- xtabs(count ~ allele + region, data = sub)
   test <- suppressWarnings(chisq.test(tab))
-  data.frame(gene = unique(sub$gene), n_allele = nrow(tab),
+  data.frame(gene = as.character(unique(sub$gene)), n_allele = nrow(tab),
              chi2 = unname(test$statistic), df = unname(test$parameter),
              p_raw = test$p.value, stringsAsFactors = FALSE)
 }))
@@ -179,7 +179,7 @@ chi_results <- chi_results[order(chi_results$p_BH), ]
 cat("\n==== Ki-kare testi, TUM 16 test edilen gen (BH duzeltmesi bu tam kumeye gore) ====\n")
 print(chi_results, row.names = FALSE)
 
-sig_genes <- chi_results$gene[chi_results$p_BH < 0.05]
+sig_genes <- as.character(chi_results$gene[chi_results$p_BH < 0.05])
 cat(sprintf("\n%d / %d gen istatistiksel olarak anlamli (BH p<0.05): %s\n",
             length(sig_genes), nrow(chi_results), paste(sig_genes, collapse = ", ")))
 
@@ -202,23 +202,52 @@ theme_prism <- theme_bw(base_size = 12) +
 
 region_colors <- c(Afrika = "#2A78D6", Avrupa = "#EB6834", Asya = "#1BAF7A")
 
-# ---- 5) one figure per SIGNIFICANT gene, one facet panel per allele (never
-#         combined into a single set of bars - each allele keeps its own
-#         separate panel) ----------------------------------------------------
+# ---- 5) ONE combined figure, all significant genes' alleles side by side in
+#         a single grid (not one stacked figure per gene) - every allele
+#         still keeps its own separate panel (3 bars), just laid out
+#         together instead of printed as 7 separate plots -------------------
+sig_data <- subset(raw_long, gene %in% sig_genes)
+sig_data$gene <- factor(as.character(sig_data$gene), levels = as.character(sig_genes))
+
+# order alleles within each gene by their own max frequency (most-common
+# allele's panel first), keep genes grouped together and in significance order
+allele_order <- unlist(lapply(sig_genes, function(g) {
+  sub <- subset(sig_data, gene == g)
+  ord <- aggregate(pct ~ allele, data = sub, max)
+  ord <- ord[order(-ord$pct), ]
+  as.character(ord$allele)
+}))
+sig_data$allele <- factor(as.character(sig_data$allele), levels = allele_order)
+
+# build the gene->allele panel order explicitly (keeps genes grouped, most
+# frequent allele first within each gene)
+panel_order <- character(0)
 for (g in sig_genes) {
-  sub  <- subset(raw_long, gene == g)
-  stat <- subset(chi_results, gene == g)
-  subtitle <- sprintf("Ki-kare testi (bu veriden R'de yeniden hesaplandi): chi2=%.2f, df=%d\nham p=%.2e, BH-duzeltmeli p=%.2e (ANLAMLI *)",
-                       stat$chi2, stat$df, stat$p_raw, stat$p_BH)
-
-  p <- ggplot(sub, aes(x = region_label, y = pct, fill = region_label)) +
-    geom_col(width = 0.65, color = "black", size = 0.3) +
-    geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2, size = 0.4, color = "black") +
-    facet_wrap(~ allele) +
-    scale_fill_manual(values = region_colors) +
-    scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.08))) +
-    labs(title = as.character(g), subtitle = subtitle, x = NULL, y = "Alel sikligi (%)") +
-    theme_prism
-
-  print(p)
+  al <- allele_order[allele_order %in% as.character(subset(sig_data, gene == g)$allele)]
+  panel_order <- c(panel_order, paste0(as.character(g), "\n", al))
 }
+sig_data$panel_label <- factor(paste0(as.character(sig_data$gene), "\n", as.character(sig_data$allele)),
+                                levels = unique(panel_order))
+
+n_panels <- nlevels(sig_data$panel_label)
+n_col <- 7  # how many allele-panels per row before wrapping to the next row
+
+combined_title <- "Cografyaya Gore Istatistiksel Olarak Anlamli D Genlerinin Alel Sikligi"
+combined_subtitle <- paste(
+  sprintf("%s (chi2=%.1f, BH-p=%.1e)", sig_genes,
+          chi_results$chi2[match(sig_genes, chi_results$gene)],
+          chi_results$p_BH[match(sig_genes, chi_results$gene)]),
+  collapse = "  |  "
+)
+
+p_all <- ggplot(sig_data, aes(x = region_label, y = pct, fill = region_label)) +
+  geom_col(width = 0.65, color = "black", size = 0.3) +
+  geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2, size = 0.4, color = "black") +
+  facet_wrap(~ panel_label, ncol = n_col) +
+  scale_fill_manual(values = region_colors) +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.08))) +
+  labs(title = combined_title, subtitle = combined_subtitle, x = NULL, y = "Alel sikligi (%)") +
+  theme_prism +
+  theme(plot.subtitle = element_text(size = 7.5))
+
+print(p_all)
