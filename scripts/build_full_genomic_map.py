@@ -57,6 +57,11 @@ LINES_PER_ALLELE = 4  # DNA, RF1, RF2, RF3
 
 
 def gene_rss_info(gene: str, rss_ref: pd.DataFrame, sarp_scores: pd.DataFrame) -> dict:
+    """{side: (rss9mer, score)} per gene. A score of None is genuinely
+    ambiguous, so callers should use gene_rss_status() alongside it: an RSS
+    absent from the SARP table is NOT "unknown" - if it is a well-formed CAC
+    9-mer, the assay did test it and never once saw it in ~1.7M recombination
+    products, which means its activity is at or below the detection floor."""
     score_lookup = dict(zip(sarp_scores["rss9mer"], sarp_scores["mean_score"]))
     out = {}
     for side in ("5", "3"):
@@ -67,6 +72,16 @@ def gene_rss_info(gene: str, rss_ref: pd.DataFrame, sarp_scores: pd.DataFrame) -
         rss9mer = row.iloc[0]["rss9mer"]
         out[side] = (rss9mer, score_lookup.get(rss9mer))
     return out
+
+
+def rss_score_label(rss9mer: str | None, score: float | None, scored_mers: set[str]) -> str:
+    """What to actually print for this side's SARP score."""
+    if score is not None:
+        return f"{score:.4f}"
+    if rss9mer and len(rss9mer) == 9 and rss9mer.startswith("CAC") and rss9mer not in scored_mers:
+        # tested by SARP-seq, never detected among ~1.7M recombination products
+        return "~0 (never recombined)"
+    return "not tested"
 
 
 def gene_allele_ranking(gene: str, d_rows: pd.DataFrame) -> list[tuple[str, str, float, int]]:
@@ -140,6 +155,8 @@ def main():
         max_alleles = max(max_alleles, len(alleles))
     print(f"      Highest number of real alleles for any single gene: {max_alleles}")
 
+    scored_mers = set(sarp_scores["rss9mer"])
+
     print("[3/3] Writing Excel...")
     wb = Workbook()
     ws = wb.active
@@ -159,7 +176,9 @@ def main():
         "Real, identical-in-everyone RSS 9-mer (with SARP score) on each side of every gene. In the gene's own "
         "box, that position's real D-REGION alleles are ranked from most to least common (with percentage); "
         "under each allele are its DNA sequence and its RF1/RF2/RF3 (3 reading frame) amino acid translation. "
-        "'*' = stop codon (shown in red)."
+        "'*' = stop codon (shown in red). SARP score '~0 (never recombined)' = that RSS 9-mer WAS assayed by "
+        "SARP-seq but was never detected among ~1.7M recombination products; 'not tested' = the 9-mer is not in "
+        "the assayed CAC-form library at all."
     )
     ws["A2"].font = Font(name=FONT, size=9, italic=True, color="595959")
 
@@ -186,9 +205,9 @@ def main():
         gcell.alignment = Alignment(horizontal="center")
 
         # SARP scores (above the RSS sequences)
-        ws.cell(row=SARP_ROW, column=c_5, value=round(rss5_sarp, 4) if rss5_sarp is not None else "no data").font = sarp_font
+        ws.cell(row=SARP_ROW, column=c_5, value=rss_score_label(rss5_seq, rss5_sarp, scored_mers)).font = sarp_font
         ws.cell(row=SARP_ROW, column=c_gene, value="D-REGION Alleles (+3 Frames)").font = Font(name=FONT, size=8, italic=True, bold=True)
-        ws.cell(row=SARP_ROW, column=c_3, value=round(rss3_sarp, 4) if rss3_sarp is not None else "no data").font = sarp_font
+        ws.cell(row=SARP_ROW, column=c_3, value=rss_score_label(rss3_seq, rss3_sarp, scored_mers)).font = sarp_font
         for cc in (c_5, c_gene, c_3):
             ws.cell(row=SARP_ROW, column=cc).alignment = Alignment(horizontal="center")
 
