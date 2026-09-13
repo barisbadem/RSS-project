@@ -75,13 +75,24 @@ def gene_rss_info(gene: str, rss_ref: pd.DataFrame, sarp_scores: pd.DataFrame) -
 
 
 def rss_score_label(rss9mer: str | None, score: float | None, scored_mers: set[str]) -> str:
-    """What to actually print for this side's SARP score."""
+    """What to actually print for this side's SARP score.
+
+    An absent score is NOT evidence that the RSS is inactive. The SARP-seq
+    library randomised only heptamer positions 4-7 plus the first 2 spacer
+    bases; the remaining 10 spacer bases and the whole nonamer were held at
+    consensus, and the assay ran on an extrachromosomal plasmid in HEK293T
+    against a consensus 23-RSS partner. A genomic RSS whose 9-mer code is
+    missing from the table therefore differs from the assayed construct
+    everywhere outside those 9 positions, and can be perfectly functional in
+    the locus. IGHD4-23 is the worked example: its 5' 9-mer (CACAGCAGG) is
+    absent from the table, yet the gene is present in the expressed human
+    repertoire (Lee et al., Immunogenetics 2006, doi:10.1007/s00251-005-0062-5).
+    So the label says only what is true: the 9-mer is not in the table."""
     if score is not None:
         return f"{score:.4f}"
-    if rss9mer and len(rss9mer) == 9 and rss9mer.startswith("CAC") and rss9mer not in scored_mers:
-        # tested by SARP-seq, never detected among ~1.7M recombination products
-        return "~0 (never recombined)"
-    return "not tested"
+    if rss9mer and len(rss9mer) == 9 and rss9mer.startswith("CAC"):
+        return "not in SARP table"
+    return "not a CAC 9-mer"
 
 
 def gene_allele_ranking(gene: str, d_rows: pd.DataFrame) -> list[tuple[str, str, float, int]]:
@@ -176,9 +187,11 @@ def main():
         "Real, identical-in-everyone RSS 9-mer (with SARP score) on each side of every gene. In the gene's own "
         "box, that position's real D-REGION alleles are ranked from most to least common (with percentage); "
         "under each allele are its DNA sequence and its RF1/RF2/RF3 (3 reading frame) amino acid translation. "
-        "'*' = stop codon (shown in red). SARP score '~0 (never recombined)' = that RSS 9-mer WAS assayed by "
-        "SARP-seq but was never detected among ~1.7M recombination products; 'not tested' = the 9-mer is not in "
-        "the assayed CAC-form library at all."
+        "'*' = stop codon (shown in red). SARP score 'not in SARP table' = the 9-mer code is absent from "
+        "Hoolehan et al.'s data; this is NOT evidence of an inactive RSS, since the assay randomised only "
+        "heptamer positions 4-7 plus 2 spacer bases and held the rest of the spacer and the whole nonamer at "
+        "consensus, on a plasmid substrate. IGHD4-23 carries such a 9-mer yet is present in the expressed human "
+        "repertoire (Lee et al., Immunogenetics 2006)."
     )
     ws["A2"].font = Font(name=FONT, size=9, italic=True, color="595959")
 

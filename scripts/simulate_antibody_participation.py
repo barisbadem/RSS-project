@@ -21,12 +21,23 @@ Monte Carlo sampling, so the reported numbers are exact under the model.
 Assumption handling (all explicit, all reported):
   - A gene with no 3' score cannot be selected at step 1 (excluded from the
     step-1 pool) - it has no measurable D->J activity to go on.
-  - A 5' RSS that IS a valid CAC 9-mer but is absent from the SARP table was
-    tested by the assay and never once detected among ~1.7M recombination
-    products, so it is scored at half the assay's detection floor, not as
-    "unknown".
-  - A 5' RSS that is not a valid CAC 9-mer (or has no data) was never tested;
-    those genes are reported separately rather than given an invented number.
+  - An RSS whose 9-mer code is absent from the SARP table is treated as
+    UNKNOWN and its gene is excluded, not scored at a detection floor. An
+    earlier version of this script scored such RSSs at half the detection
+    floor on the reasoning that absence meant "assayed and never recovered".
+    That reasoning is wrong: the SARP library randomised only heptamer
+    positions 4-7 plus the first 2 spacer bases, holding the other 10 spacer
+    bases and the entire nonamer at consensus, on an extrachromosomal plasmid
+    in HEK293T against a consensus 23-RSS partner. A genomic RSS missing from
+    the table differs from anything assayed outside those 9 positions.
+    IGHD4-23 settles it: its 5' 9-mer (CACAGCAGG) is absent from the table,
+    yet the gene is present in the expressed human repertoire (Lee et al.,
+    Immunogenetics 2006, doi:10.1007/s00251-005-0062-5).
+
+This model is a chromatin-independent null: it uses only intrinsic RSS
+recombination potential and knows nothing about locus architecture, RAG
+scanning, accessibility or post-recombination selection. It is not a
+prediction of real IGHD usage and should not be presented as one.
 
 Usage:
     python scripts/simulate_antibody_participation.py [--cache-dir .cache] [--genes IGHD3-3 IGHD2-21]
@@ -62,8 +73,7 @@ def load_gene_scores(cache_dir: Path) -> pd.DataFrame:
     extra = vdjbase[~vdjbase.apply(lambda r: (r["gene"], r["allele"], r["side"]) in have, axis=1)]
     rss_ref = pd.concat([primary, extra], ignore_index=True)
 
-    scored = set(sarp["rss9mer"])
-    floor = sarp["mean_score"].min() / 2.0
+    floor = sarp["mean_score"].min()
 
     rows = []
     for gene in GENOMIC_ORDER_GENES:
@@ -74,9 +84,11 @@ def load_gene_scores(cache_dir: Path) -> pd.DataFrame:
             if score is not None:
                 rec[f"s{side}"], rec[f"status{side}"] = float(score), "measured"
             elif seq and len(seq) == 9 and seq.startswith("CAC"):
-                rec[f"s{side}"], rec[f"status{side}"] = floor, "tested_never_detected"
+                # present in the genome, absent from the assayed table - unknown,
+                # NOT zero. See the module docstring.
+                rec[f"s{side}"], rec[f"status{side}"] = np.nan, "not_in_sarp_table"
             else:
-                rec[f"s{side}"], rec[f"status{side}"] = np.nan, "never_tested"
+                rec[f"s{side}"], rec[f"status{side}"] = np.nan, "no_cac_9mer"
             rec[f"seq{side}"] = seq
         rows.append(rec)
     return pd.DataFrame(rows), floor
@@ -125,10 +137,10 @@ def main():
     print("=" * 78)
     show = df[["position", "gene", "seq5", "s5", "status5", "seq3", "s3", "status3"]]
     print(show.to_string(index=False))
-    print(f"\nDetection floor used for 'tested_never_detected': {floor:.6f}")
+    print(f"\nLowest measured score in the SARP table: {floor:.6f}")
 
     excluded = df[df["s3"].isna() | df["s5"].isna()]["gene"].tolist()
-    print(f"\nExcluded from the simulation (never-tested RSS, cannot be scored): {excluded}")
+    print(f"\nExcluded (an RSS 9-mer that the SARP table does not cover - unknown, not zero): {excluded}")
 
     print("\n" + "=" * 78)
     print("BASELINE: no deletion (all scorable genes present on both chromosomes)")

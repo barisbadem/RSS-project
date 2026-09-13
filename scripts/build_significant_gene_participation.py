@@ -10,14 +10,23 @@ flagging the 7 genes whose D-REGION allele frequencies differ significantly
 between geographic regions (chi-square + Benjamini-Hochberg over all 16
 multi-allele genes).
 
-Two models are reported side by side:
-  base - the plain Luce/Bradley-Terry race on the 5' score.
-  cond - the same, but a cell whose BOTH alleles carry a 5' RSS that never
-         recombines cannot complete V->DJ at all, makes no heavy chain and is
-         lost; those cells are conditioned out. This only matters for
-         IGHD4-23 (the one gene with a dead 5' RSS and a strong 3' RSS),
-         which the base model otherwise credits with winning by default
-         whenever it is selected on both chromosomes.
+IMPORTANT - what this is and is not.
+
+This is a CHROMATIN-INDEPENDENT NULL MODEL. It uses only the intrinsic
+recombination potential of the RSS sequences and knows nothing about the
+things the literature says actually dominate IGHD usage: position relative to
+the recombination centre, cohesin-driven RAG scanning, CTCF-binding elements,
+germline transcription/accessibility, reading-frame selection and pre-BCR
+selection. It does not predict real repertoire usage, and it disagrees with
+it (IGHD3-10 is the most-used D gene in adult human repertoires but ranks
+near the bottom here). The disagreement is the point: the residual is what
+locus architecture and selection contribute.
+
+Genes whose RSS 9-mer is not covered by the SARP table are EXCLUDED, not
+scored at zero. Absence from that table is not evidence of an inactive RSS -
+the assay randomised only heptamer positions 4-7 plus 2 spacer bases, on a
+plasmid in HEK293T. IGHD4-23 carries such a 9-mer and is nonetheless present
+in the expressed human repertoire (Lee et al., Immunogenetics 2006).
 
 Usage:
     python scripts/build_significant_gene_participation.py [--cache-dir .cache]
@@ -58,21 +67,12 @@ def participation_table(df: pd.DataFrame, floor: float) -> pd.DataFrame:
     np.fill_diagonal(race, 1.0)
     joint = np.outer(p_sel, p_sel)
 
-    # cells whose both alleles carry a never-recombining 5' RSS are non-productive
-    dead = s5 <= floor * 1.001
-    viable = ~(dead[:, None] & dead[None, :])
-    joint_c = joint * viable
-    lost = 1.0 - joint_c.sum()
-    joint_c = joint_c / joint_c.sum()
-
     out = pool[["gene", "position", "seq5", "s5", "status5", "seq3", "s3", "status3"]].copy()
     out["p_step1"] = p_sel
     out["p_base"] = (joint * race).sum(axis=1) + (joint * (1 - race)).sum(axis=0)
-    out["p_cond"] = (joint_c * race).sum(axis=1) + (joint_c * (1 - race)).sum(axis=0)
     out["rank_base"] = out["p_base"].rank(ascending=False, method="min").astype(int)
-    out["rank_cond"] = out["p_cond"].rank(ascending=False, method="min").astype(int)
     out["significant"] = out["gene"].isin(SIGNIFICANT_GENES)
-    return out.sort_values("p_base", ascending=False).reset_index(drop=True), lost
+    return out.sort_values("p_base", ascending=False).reset_index(drop=True)
 
 
 def write_sheet(ws, tab: pd.DataFrame, n_genes: int, title: str, note: str):
@@ -131,15 +131,18 @@ def main():
     df, floor = load_gene_scores(Path(args.cache_dir))
 
     print("[2/3] Enumerating all chromosome-pair outcomes...")
-    tab, lost = participation_table(df, floor)
+    tab = participation_table(df, floor)
     n = len(tab)
 
-    print(f"      Genes in play: {n}; non-productive cells removed in 'cond' model: {lost*100:.3f}%")
+    excluded = df[df["s3"].isna() | df["s5"].isna()]["gene"].tolist()
+    print(f"      Genes in play: {n}; excluded (RSS 9-mer not covered by the SARP table): {excluded}")
     print()
     sig = tab[tab["significant"]].sort_values("rank_base")
     for row in sig.itertuples(index=False):
-        print(f"  rank {row.rank_base:2d}/{n}  {row.gene:10s} {row.p_base*100:6.2f}%"
-              f"   (cond model: rank {row.rank_cond:2d}, {row.p_cond*100:.2f}%)")
+        print(f"  rank {row.rank_base:2d}/{n}  {row.gene:10s} {row.p_base*100:6.2f}%")
+    missing = [g for g in SIGNIFICANT_GENES if g not in set(tab["gene"])]
+    if missing:
+        print(f"  not scorable: {missing}")
 
     print("\n[3/3] Writing Excel...")
     wb = Workbook()
@@ -147,31 +150,18 @@ def main():
     ws.title = "Participation_Ranking"
     write_sheet(
         ws, tab, n,
-        "Antibody-Participation Ranking of All D Genes, with the 7 Geographically Significant Genes Highlighted",
-        "Probabilities come from the exact enumeration of all 27x27 chromosome pairs under the two-step mechanism: "
-        "step 1 (D->J) picks one D per chromosome with weight proportional to its 3' SARP score; step 2 (V->DJ) races "
-        "the two DJ intermediates with weight proportional to the 5' SARP score. All SARP scores are the real "
-        "Hoolehan et al. 2022 (NAR 50:11696) values. Highlighted rows = the 7 genes whose D-REGION allele frequencies "
-        "differ significantly between geographic regions (chi-square, BH-adjusted over all 16 multi-allele genes). "
-        "NOTE: geography changes participation only by deleting a gene - the RSS sequences themselves are identical "
-        "in every individual in the KIARVA data, so these probabilities are the same in Africa, Europe and Asia.",
-    )
-
-    ws2 = wb.create_sheet("Dead_5prime_Variant")
-    tab2 = tab.copy()
-    tab2["p_base"] = tab["p_cond"]
-    tab2["rank_base"] = tab["rank_cond"]
-    tab2 = tab2.sort_values("p_base", ascending=False)
-    write_sheet(
-        ws2, tab2, n,
-        "Same Ranking, Excluding Cells That Cannot Complete V->DJ on Either Chromosome",
-        "Identical model, with one correction: IGHD4-23's 5' RSS (CACAGCAGG) was assayed by SARP-seq and never "
-        f"detected among ~1.7M recombination products, so a cell that selected IGHD4-23 at step 1 on BOTH chromosomes "
-        f"cannot complete V->DJ at all - it makes no heavy chain and is lost, rather than expressing IGHD4-23 by "
-        f"default. Removing those {lost*100:.2f}% of cells moves IGHD4-23 from rank "
-        f"{int(tab.loc[tab['gene']=='IGHD4-23','rank_base'].iloc[0])} to rank "
-        f"{int(tab.loc[tab['gene']=='IGHD4-23','rank_cond'].iloc[0])} (last) and leaves every other gene essentially "
-        "unchanged.",
+        "Intrinsic-RSS Null Model: Antibody-Participation Ranking of All D Genes",
+        "CHROMATIN-INDEPENDENT NULL MODEL - not a prediction of real repertoire usage. Probabilities come from the "
+        "exact enumeration of all chromosome pairs under the two-step mechanism: step 1 (D->J) picks one D per "
+        "chromosome with weight proportional to its 3' SARP score; step 2 (V->DJ) weights the two DJ intermediates "
+        "by the 5' SARP score. All scores are the real Hoolehan et al. 2022 (NAR 50:11696) values. The model knows "
+        "nothing about recombination-centre position, RAG scanning, CTCF elements, accessibility, reading-frame or "
+        "pre-BCR selection, which the literature says dominate IGHD usage - so it disagrees with observed usage, and "
+        "that residual is the contribution of those layers. Genes whose RSS 9-mer is absent from the SARP table are "
+        "excluded (unknown, NOT zero). Highlighted rows = the 7 genes whose D-REGION allele frequencies differ "
+        "significantly between geographic regions (chi-square, BH-adjusted over all 16 multi-allele genes). The RSS "
+        "sequences themselves are identical in every individual in the KIARVA data, so geography changes "
+        "participation only by deleting a gene, never through the RSS.",
     )
 
     out_path = Path(args.out)

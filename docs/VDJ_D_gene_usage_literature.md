@@ -186,7 +186,7 @@ This is the part of our project that the literature supports directly:
 | D-to-J happens on both alleles; V-to-DJ is the excluded step | Supported (Giallourakis 2010; Wu 2020) |
 | Selection probability **linearly proportional** to 3' SARP score | **Our assumption.** No source. Contradicted in emphasis by the scanning/chromatin literature |
 | Allelic outcome = Bradley-Terry **race** on 5' SARP score | **Our assumption.** Literature says asynchronous stochastic initiation + feedback, with V (not D 5') RSS setting the rate |
-| A D whose 5' RSS never recombines cannot complete V-to-DJ | Defensible as a necessary-condition filter (Hoolehan et al., *NAR* 2022;50:11696-711) |
+| A D whose 5' RSS is absent from the SARP table is inactive | **Retracted.** IGHD4-23's 5' 9-mer (CACAGCAGG) is absent from that table, yet the gene is present in the expressed human repertoire (Lee et al., *Immunogenetics* 2006;58:57-61, doi:10.1007/s00251-005-0062-5). The assay randomised only heptamer positions 4-7 plus 2 spacer bases, on a plasmid in HEK293T; absence from it says nothing about the genomic RSS. Such genes are now excluded as unknown, not scored at zero. |
 | Geography acts through gene presence/absence | Supported (Rodriguez 2023; KIARVA) |
 
 ### Consequence
