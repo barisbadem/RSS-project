@@ -8,17 +8,34 @@ data; nothing is quoted from a paper except where cited.
 
 ## Part 1 - What the data supports, strongest first
 
-### 1.1 The RSS is invariant. This is the load-bearing negative result.
+### 1.1 The RSS is near-invariant. This is the load-bearing negative result.
 
 Across **97,513 per-observation RSS calls from 2,470 individuals**, 99.9877%
-match the modal 9-mer for their gene and side. Of the **51 gene x side
-combinations**, **zero** carry more than one distinct 9-mer once per-person
-majority calling is applied. Only two combinations show any minority call at
-all: IGHD1-26 5' (3 of 397) and IGHD4-4 5' (9 of 1,720).
+carry their gene's modal 9-mer. **49 of the 51 gene x side units show no
+variation at all.**
 
-The 27 D genes are covered by only **10 distinct 5' 9-mers and 9 distinct 3'
-9-mers**, shared within IGHD families (IGHD2-2 and IGHD2-21, for instance,
-carry an identical pair: 5' CACTGTGGT, 3' CACAGTGAC).
+Two units do carry a genuine rare SNP, both on the 5' side. Each was checked
+against the possibility of paralog mis-assignment by comparing the full read,
+not just the 9-mer; in both cases the surrounding flank is identical to that
+gene's own common variant and unlike any paralog, so these are real variants
+of the gene in question:
+
+| Gene | Change | Carriers | Ancestry |
+|---|---|---|---|
+| IGHD1-26 5' | CACGGTGGT -> CACTGTGGT (1 SNP) | 3 / 396 | all 3 East Asian (CHS, KHV x2) |
+| IGHD4-4 5' | CACAGTAGG -> CACAGCAGG (1 SNP in the RSS window) | 9 / 1699 | 8 African + 1 PUR |
+
+The African enrichment at IGHD4-4 gives Fisher one-sided p = 4.1e-4, but the
+hypothesis was formed after seeing the data, n = 9, and 51 x 5 comparisons
+were available - so this is a hypothesis-generating observation, not a
+result. It is nonetheless the one place in these data where geography touches
+the RSS at all, and it is notable that the variant converts the 9-mer to
+CACAGCAGG, which is absent from the SARP table. Independent replication is
+required before any weight is put on it.
+
+The 27 D genes are otherwise covered by only **10 distinct 5' 9-mers and 9
+distinct 3' 9-mers**, shared within IGHD families (IGHD2-2 and IGHD2-21, for
+instance, carry an identical pair: 5' CACTGTGGT, 3' CACAGTGAC).
 
 This matters because RSS quality is a *causal* determinant of gene usage -
 replacing a single Vb RSS with a better one measurably raises that segment's
