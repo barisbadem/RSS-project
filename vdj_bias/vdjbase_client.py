@@ -34,6 +34,39 @@ import requests
 BASE_URL = "https://vdjbase.org/admin/api/genomic/"
 
 
+_COMPLEMENT = str.maketrans("ACGT", "TGCA")
+
+
+def _reverse_complement(seq: str) -> str:
+    return seq.translate(_COMPLEMENT)[::-1]
+
+
+def _sarp_9mer(side: str, heptamer: str, spacer: str) -> str:
+    """Build the SARP 9-mer (heptamer + first 2 spacer bases, read from the
+    coding end outward) from VDJbase's own RSS annotation columns.
+
+    VDJbase writes every column in top-strand genomic order - the CSV header
+    runs D-5_NONAMER, D-5_SPACER, D-5_HEPTAMER, then the gene, then
+    D-3_HEPTAMER, D-3_SPACER, D-3_NONAMER. On the 3' side that order already
+    matches the direction the RSS is read in, so heptamer + spacer[:2] is
+    correct as written.
+
+    On the 5' side it does not. The V-proximal RSS is read on the opposite
+    strand, so D-5_HEPTAMER holds the reverse complement of the functional
+    heptamer, and the spacer bases adjacent to the heptamer are the LAST ones
+    in D-5_SPACER rather than the first. Reverse-complementing both, and
+    taking the spacer's final two bases, recovers the same 9-mer the 3' side
+    yields - and the same one the reference genome gives.
+
+    An earlier version applied the 3' formula to both sides. That put every
+    5' 9-mer on the wrong strand; none of the 27 matched GRCh38, while all 27
+    of the 3' values did."""
+    hep, sp = heptamer[:7].upper(), spacer.upper()
+    if side == "3":
+        return hep + sp[:2]
+    return _reverse_complement(hep) + _reverse_complement(sp[-2:])
+
+
 def fetch_all_igh_subjects(cache_dir: Path) -> pd.DataFrame:
     """All reachable Human IGH genomic samples with subject/ancestry metadata."""
     cache_file = cache_dir / "vdjbase_igh_subjects.json"
@@ -122,7 +155,7 @@ def build_rss_reference_table(cache_dir: Path, max_subjects: int | None = None) 
                         "heptamer": hep[:7].upper(),
                         "spacer": sp.upper(),
                         "nonamer": r.get("D-{}_NONAMER".format(side), None),
-                        "rss9mer": (hep[:7] + sp[:2]).upper(),
+                        "rss9mer": _sarp_9mer(side, hep, sp),
                     }
                 )
 
