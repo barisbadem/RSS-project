@@ -320,6 +320,23 @@ def main():
     short_rows = d_rows[~d_rows["is_long"]]
     for db_name, seq in zip(short_rows["base_db_name"], short_rows["sequence"]):
         allele_seq.setdefault(db_name, seq)
+    # Some genes never get a short read under their own name. IGHD4-11 is the
+    # clear case: all 2201 of its rows are flank-extended, and its only core
+    # D-REGION call sits under the ambiguous compound name
+    # "IGHD4-11*01/IGHD4-4*01", because the two genes share an identical core
+    # at that read length and cannot be told apart. The sequence is real and
+    # correct for BOTH named genes, so index it under each component too -
+    # otherwise IGHD4-11 is reported as having no data when in fact it has
+    # thousands of observations. Same fix as build_core_sequence_lookup().
+    for db_name, seq in list(allele_seq.items()):
+        if "/" not in db_name:
+            continue
+        gene_part, _, allele_part = db_name.partition("*")
+        for component in db_name.split("/"):
+            if "*" not in component:
+                # bare gene name in a compound like "IGHD4-11*01/IGHD4-4*01"
+                continue
+            allele_seq.setdefault(component, seq)
 
     print("[2/5] SARP skoruna gore VDJ-katilim sirasi hesaplaniyor (RSS zaten herkeste ayni oldugu icin bu sira herkeste sabit)...")
     sarp_scores = load_sarp_scores(cache_dir / "sarp")

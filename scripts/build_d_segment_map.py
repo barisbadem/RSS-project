@@ -31,6 +31,15 @@ from vdj_bias.kiarva_genotypes import build_genotype_cohort, build_rss_reference
 from vdj_bias.sarp_scores import load_sarp_scores
 from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_rss_table
 
+# A missing SARP score means the RSS 9-mer is ABSENT FROM Hoolehan et al.'s
+# table - it is NOT evidence that the RSS is inactive. The assay randomised
+# only heptamer positions 4-7 plus the first 2 spacer bases, holding the rest
+# of the spacer and the whole nonamer at consensus, on a plasmid in HEK293T.
+# IGHD4-23 carries such a 9-mer and is nonetheless present in the expressed
+# human repertoire (Lee et al., Immunogenetics 2006, doi:10.1007/s00251-005-0062-5).
+SARP_ABSENT = "SARP tablosunda yok"
+
+
 CANONICAL_GENES = [
     "IGHD1-1", "IGHD1-7", "IGHD1-14", "IGHD1-20", "IGHD1-26",
     "IGHD2-2", "IGHD2-8", "IGHD2-15", "IGHD2-21",
@@ -125,7 +134,7 @@ def build_workbook(long_df: pd.DataFrame, out_path: Path) -> None:
 
         notes = []
         if pd.isna(mean5):
-            ws.cell(row=r, column=2, value="veri yok").font = missing_font
+            ws.cell(row=r, column=2, value=SARP_ABSENT).font = missing_font
             ws.cell(row=r, column=3, value="-").font = missing_font
             notes.append("5' RSS icin gercek flank-okuma bulunamadi")
         else:
@@ -133,7 +142,7 @@ def build_workbook(long_df: pd.DataFrame, out_path: Path) -> None:
             ws.cell(row=r, column=3, value=int(n5)).font = cell_font
 
         if pd.isna(mean3):
-            ws.cell(row=r, column=4, value="veri yok").font = missing_font
+            ws.cell(row=r, column=4, value=SARP_ABSENT).font = missing_font
             ws.cell(row=r, column=5, value="-").font = missing_font
             notes.append("3' RSS icin gercek flank-okuma bulunamadi")
         else:
@@ -204,7 +213,7 @@ def build_workbook(long_df: pd.DataFrame, out_path: Path) -> None:
             False,
         ),
         ("", False),
-        ("Eksik hucreler ('veri yok')", True),
+        ("Eksik hucreler (SARP tablosunda yok)", True),
         (
             "27 D geni x 2 taraf = 54 olasi hucreden 45'i dolduruldu. 9 hucre (agirlikli olarak IGHD4 ve "
             "IGHD5 ailesinin 5' tarafi) icin ne genotip dosyasinda ne de VDJbase'de gercek bir "

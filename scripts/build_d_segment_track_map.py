@@ -35,6 +35,15 @@ from vdj_bias.kiarva_genotypes import build_group_cohorts, build_rss_reference_t
 from vdj_bias.sarp_scores import load_sarp_scores
 from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_rss_table
 
+# A missing SARP score means the RSS 9-mer is ABSENT FROM Hoolehan et al.'s
+# table - it is NOT evidence that the RSS is inactive. The assay randomised
+# only heptamer positions 4-7 plus the first 2 spacer bases, holding the rest
+# of the spacer and the whole nonamer at consensus, on a plasmid in HEK293T.
+# IGHD4-23 carries such a 9-mer and is nonetheless present in the expressed
+# human repertoire (Lee et al., Immunogenetics 2006, doi:10.1007/s00251-005-0062-5).
+SARP_ABSENT = "SARP tablosunda yok"
+
+
 FONT = "Arial"
 ALPHA = 0.05
 
@@ -110,7 +119,7 @@ def build_workbook(long_df: pd.DataFrame, sig: dict[tuple[str, str], bool], out_
             mean_val = wide_mean.get(col_key, {}).get(gene)
             vcell = ws.cell(row=VALUE_ROW, column=col)
             if pd.isna(mean_val):
-                vcell.value = "veri yok"
+                vcell.value = SARP_ABSENT
                 vcell.font = Font(name=FONT, size=9, italic=True, color="808080")
                 vcell.fill = missing_fill
             else:
@@ -172,7 +181,7 @@ def build_workbook(long_df: pd.DataFrame, sig: dict[tuple[str, str], bool], out_
             ws2.cell(row=r, column=3, value=None if pd.isna(mean_val) else round(float(mean_val), 4)).font = Font(
                 name=FONT, size=10
             )
-            sig_text = "veri yok" if pd.isna(mean_val) else ("EVET" if sig.get((gene, side), False) else "hayir")
+            sig_text = SARP_ABSENT if pd.isna(mean_val) else ("EVET" if sig.get((gene, side), False) else "hayir")
             ws2.cell(row=r, column=4, value=sig_text).font = Font(name=FONT, size=10)
             r += 1
     for i, w in enumerate([14, 18, 16, 18], start=1):

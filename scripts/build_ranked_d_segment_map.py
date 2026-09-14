@@ -47,6 +47,15 @@ from vdj_bias.kiarva_genotypes import (
 from vdj_bias.sarp_scores import load_sarp_scores
 from vdj_bias.vdjbase_client import build_rss_reference_table as build_vdjbase_rss_table
 
+# A missing SARP score means the RSS 9-mer is ABSENT FROM Hoolehan et al.'s
+# table - it is NOT evidence that the RSS is inactive. The assay randomised
+# only heptamer positions 4-7 plus the first 2 spacer bases, holding the rest
+# of the spacer and the whole nonamer at consensus, on a plasmid in HEK293T.
+# IGHD4-23 carries such a 9-mer and is nonetheless present in the expressed
+# human repertoire (Lee et al., Immunogenetics 2006, doi:10.1007/s00251-005-0062-5).
+SARP_ABSENT = "SARP tablosunda yok"
+
+
 FONT = "Arial"
 ALPHA = 0.05
 DARK = "1F3864"
@@ -175,7 +184,7 @@ def build_geographic_workbook(ranked: pd.DataFrame, region_scored: pd.DataFrame,
             mean_val = wide["mean"].get((gene, g))
             cell = ws.cell(row=r, column=col)
             if pd.isna(mean_val):
-                cell.value = "veri yok"
+                cell.value = SARP_ABSENT
                 cell.font = Font(name=FONT, size=9, italic=True, color="808080")
             else:
                 cell.value = f"{round(float(mean_val), 4)}{' *' if is_sig else ''}"

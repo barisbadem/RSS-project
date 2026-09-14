@@ -37,6 +37,15 @@ from scripts.build_ranked_d_segment_map import combined_per_person_scores, load_
 from vdj_bias.analysis import score_cohorts
 from vdj_bias.kiarva_genotypes import build_genotype_cohort, build_per_person_rss_table
 
+# A missing SARP score means the RSS 9-mer is ABSENT FROM Hoolehan et al.'s
+# table - it is NOT evidence that the RSS is inactive. The assay randomised
+# only heptamer positions 4-7 plus the first 2 spacer bases, holding the rest
+# of the spacer and the whole nonamer at consensus, on a plasmid in HEK293T.
+# IGHD4-23 carries such a 9-mer and is nonetheless present in the expressed
+# human repertoire (Lee et al., Immunogenetics 2006, doi:10.1007/s00251-005-0062-5).
+SARP_ABSENT = "SARP tablosunda yok"
+
+
 FONT = "Arial"
 DELETION_BLOCK = ["IGHD1-7", "IGHD2-8", "IGHD3-3", "IGHD4-4", "IGHD5-5", "IGHD6-6"]
 RS_ID = "rs78818281"
@@ -101,8 +110,8 @@ def main():
         vals = [
             gene,
             rank,
-            round(v5, 4) if v5 is not None else "veri yok",
-            round(v3, 4) if v3 is not None else "veri yok",
+            round(v5, 4) if v5 is not None else SARP_ABSENT,
+            round(v3, 4) if v3 is not None else SARP_ABSENT,
             family,
             note,
         ]
