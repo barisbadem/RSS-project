@@ -189,17 +189,33 @@ def _extract_raw_rss_rows(d_rows: pd.DataFrame) -> pd.DataFrame:
             continue
         prefix, suffix = seq[:idx], seq[idx + len(core) :]
         if len(suffix) >= 9:
-            mer3 = suffix[:9]
-            if mer3.startswith("CAC"):
-                rows.append({"case": case, "gene": gene, "allele": base_db_name, "side": "3", "rss9mer": mer3})
+            # No "CAC" filter here either. Discarding non-CAC 9-mers silently
+            # threw away 2,861 real reads, among them every read of IGHD4-11's
+            # 3' RSS (CATAGTGAT, 2201/2201 reads) and the 658 reads carrying
+            # the common IGHD6-25 5' variant. A non-consensus heptamer is a
+            # finding, not a parse failure.
+            rows.append({"case": case, "gene": gene, "allele": base_db_name, "side": "3", "rss9mer": suffix[:9]})
         if len(prefix) >= 9:
-            mer5 = prefix[-7:] + prefix[-9:-7]
-            if not mer5.startswith("CAC"):
-                revcomp_candidate = _reverse_complement(prefix[-9:])
-                if revcomp_candidate.startswith("CAC"):
-                    mer5 = revcomp_candidate
-            if mer5.startswith("CAC"):
-                rows.append({"case": case, "gene": gene, "allele": base_db_name, "side": "5", "rss9mer": mer5})
+            # The 5' (V-proximal) RSS lies on the opposite strand from the 3'
+            # one, so its SARP 9-mer is the reverse complement of the nine
+            # genomic bases immediately upstream of the coding core. Reversing
+            # and complementing those nine bases puts the heptamer first and
+            # the first two spacer bases second - exactly the order SARP's
+            # code uses on the 3' side.
+            #
+            # An earlier version used `prefix[-7:] + prefix[-9:-7]` as the
+            # primary formula, falling back to the reverse complement only
+            # when that failed to start with "CAC". That formula is a bug: it
+            # never complements anything, it merely rotates the raw nine bases
+            # two positions, which has no biological meaning. It survived
+            # because reverse-complementing the consensus heptamer CACAGTG
+            # gives CACTGTG, which also begins with CAC - so "starts with CAC"
+            # cannot distinguish the two readings, and for 17 of 26 genes both
+            # produced a CAC-initial 9-mer. The rotation also disagreed with
+            # the heptamer consensus more often (mean 1.15 vs 0.77 mismatches
+            # against CACAGTG; exact consensus for 5 genes vs 10).
+            mer5 = _reverse_complement(prefix[-9:])
+            rows.append({"case": case, "gene": gene, "allele": base_db_name, "side": "5", "rss9mer": mer5})
 
     return pd.DataFrame(rows, columns=["case", "gene", "allele", "side", "rss9mer"])
 
