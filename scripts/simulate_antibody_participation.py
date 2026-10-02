@@ -80,7 +80,8 @@ def load_gene_scores(cache_dir: Path) -> pd.DataFrame:
         info = gene_rss_info(gene, rss_ref, sarp)
         rec = {"gene": gene, "position": int(gene.split("-")[1])}
         for side in ("5", "3"):
-            seq, score = info[side]
+            # gene_rss_info now also reports where the 9-mer came from
+            seq, score = info[side][0], info[side][1]
             if score is not None:
                 rec[f"s{side}"], rec[f"status{side}"] = float(score), "measured"
             elif seq and len(seq) == 9 and seq.startswith("CAC"):
