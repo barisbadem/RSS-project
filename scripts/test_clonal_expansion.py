@@ -12,8 +12,11 @@ This compares the four readouts built by build_oas_d_usage.py over the same
   reads     expansion-weighted (every read counted)
   unique    one vote per unique nucleotide sequence
   clones    one vote per clone - expansion removed by construction
-  unmutated only unmutated sequences (v_identity == 100), i.e. cells that
-            never passed through a germinal centre
+  lowshm    only sequences under 1% somatic hypermutation
+            (v_identity >= 99), i.e. cells that have not passed through a
+            germinal centre. An exact-100 cutoff is not used because it is
+            run-dependent: one Ellebedy run tops out at 99.648 and would be
+            emptied entirely.
 
 If expansion drives usage, `reads` and `clones` must disagree. If it does
 not, all four give the same gene ranking, and the within-donor test on the
@@ -31,7 +34,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import binomtest, spearmanr
 
-READOUTS = ["reads", "unique", "clones", "unmutated"]
+READOUTS = ["reads", "unique", "clones", "lowshm"]
 
 
 def matrix(df: pd.DataFrame, readout: str) -> pd.DataFrame:
@@ -74,7 +77,7 @@ def main() -> None:
     for gene in genes:
         groups[(reference.get(f"{gene}|5"), reference.get(f"{gene}|3"))].append(gene)
 
-    for readout in ["clones", "unmutated"]:
+    for readout in ["clones", "lowshm"]:
         mat = mats[readout]
         unanimous = total = 0
         print(f"\n  [{readout}]")
