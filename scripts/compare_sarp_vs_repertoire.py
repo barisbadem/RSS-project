@@ -138,7 +138,7 @@ def main():
     ap.add_argument("--cache-dir", default=".cache")
     ap.add_argument("--oas", required=True)
     ap.add_argument("--isotype", default="IGHM")
-    ap.add_argument("--readout", choices=["reads", "unique", "clones", "lowshm"],
+    ap.add_argument("--readout", choices=["reads", "unique", "clones", "lineage", "singleton", "lowshm"],
                     help="read --oas as the four-readout variants table and use "
                          "this readout instead of the isotype-keyed table")
     args = ap.parse_args()
