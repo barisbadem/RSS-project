@@ -11,7 +11,12 @@ This compares the four readouts built by build_oas_d_usage.py over the same
 
   reads     expansion-weighted (every read counted)
   unique    one vote per unique nucleotide sequence
-  clones    one vote per clone - expansion removed by construction
+  clones    one vote per exact clone key (junction_aa + V + J)
+  lineage   one vote per clonal lineage: mutated descendants of one
+            recombination event collapse together, which the exact key does
+            not do
+  singleton one vote per sequence read exactly once with no mutated sibling
+            anywhere in the donor - it cannot have expanded at all
   lowshm    only sequences under 1% somatic hypermutation
             (v_identity >= 99), i.e. cells that have not passed through a
             germinal centre. An exact-100 cutoff is not used because it is
@@ -34,7 +39,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import binomtest, spearmanr
 
-READOUTS = ["reads", "unique", "clones", "lowshm"]
+READOUTS = ["reads", "unique", "clones", "lineage", "singleton", "lowshm"]
 
 
 def matrix(df: pd.DataFrame, readout: str) -> pd.DataFrame:
@@ -88,7 +93,7 @@ def main() -> None:
     if skipped:
         print(f"  (no reference RSS, excluded from grouping: {', '.join(skipped)})")
 
-    for readout in ["clones", "lowshm"]:
+    for readout in ["lineage", "singleton"]:
         mat = mats[readout]
         unanimous = total = 0
         print(f"\n  [{readout}]")
