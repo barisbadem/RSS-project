@@ -109,6 +109,10 @@ def reduce_unit(df: pd.DataFrame) -> pd.DataFrame:
     df = df[df["productive"].astype(str).str.upper().isin(["T", "TRUE"])].copy()
     df["gene"] = df["d_call"].map(first_gene)
     df = df[df["gene"].notna() & df["gene"].str.startswith("IGHD")]
+    # IGHD*/OR15-* and OR16-* are orphons: IMGT places them on chromosomes 15
+    # and 16, outside the IGH locus, so they cannot be recombined into a heavy
+    # chain at all and a call for one is a misassignment to a locus D gene.
+    df = df[~df["gene"].str.contains("/OR")]
     df["Redundancy"] = pd.to_numeric(df["Redundancy"], errors="coerce").fillna(1)
     df["v_identity"] = pd.to_numeric(df["v_identity"], errors="coerce")
     df["clone"] = (

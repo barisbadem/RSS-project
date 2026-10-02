@@ -73,9 +73,20 @@ def main() -> None:
     print(f"  highest: {exp.index[-1]} {exp.iloc[-1]:.2f}x")
 
     print("\n--- within-donor ordering, identical-RSS pairs, STRICTEST readouts ---")
+    # Only genes whose RSS pair is known from the GRCh38 verification can be
+    # grouped. Without this guard every gene missing from the reference lands
+    # in one (None, None) bucket and gets compared as though the members
+    # shared an RSS, which they do not.
     groups: dict[tuple, list[str]] = defaultdict(list)
+    skipped = []
     for gene in genes:
-        groups[(reference.get(f"{gene}|5"), reference.get(f"{gene}|3"))].append(gene)
+        key = (reference.get(f"{gene}|5"), reference.get(f"{gene}|3"))
+        if None in key:
+            skipped.append(gene)
+            continue
+        groups[key].append(gene)
+    if skipped:
+        print(f"  (no reference RSS, excluded from grouping: {', '.join(skipped)})")
 
     for readout in ["clones", "lowshm"]:
         mat = mats[readout]
