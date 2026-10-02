@@ -64,6 +64,27 @@ def observed_usage(oas_csv: Path, isotype: str = "IGHM") -> pd.DataFrame:
     return out.reset_index()
 
 
+def observed_usage_readout(variants_csv: Path, readout: str) -> pd.DataFrame:
+    """Mean per-donor usage from the four-readout table, averaged over donors.
+
+    `readout` selects how much clonal expansion the measurement admits:
+    reads (expansion-weighted), unique (one vote per unique nucleotide
+    sequence), clones (one vote per clone, expansion removed by
+    construction), or lowshm (under 1% somatic hypermutation).
+    """
+    df = pd.read_csv(variants_csv)
+    df = df[df["readout"] == readout]
+    if df.empty:
+        raise SystemExit(f"no rows for readout {readout!r} in {variants_csv}")
+    per_donor = df.groupby(["donor", "gene"], as_index=False)["count"].sum()
+    totals = per_donor.groupby("donor")["count"].transform("sum")
+    per_donor["frac"] = per_donor["count"] / totals
+    out = (per_donor.groupby("gene")["frac"]
+             .agg(["mean", "std", "count"])
+             .rename(columns={"mean": "obs_frac", "std": "obs_sd", "count": "n_donor"}))
+    return out.reset_index()
+
+
 def model_table(cache_dir: Path) -> pd.DataFrame:
     """Per-gene 5'/3' SARP scores and the participation probability."""
     d_rows = load_d_gene_rows(cache_dir / "kiarva_genotypes")
@@ -117,10 +138,17 @@ def main():
     ap.add_argument("--cache-dir", default=".cache")
     ap.add_argument("--oas", required=True)
     ap.add_argument("--isotype", default="IGHM")
+    ap.add_argument("--readout", choices=["reads", "unique", "clones", "lowshm"],
+                    help="read --oas as the four-readout variants table and use "
+                         "this readout instead of the isotype-keyed table")
     args = ap.parse_args()
 
     print("[1/3] Gozlenen repertuar kullanimi (OAS, naif B, saglikli, IgM)...")
-    obs = observed_usage(Path(args.oas), args.isotype)
+    if args.readout:
+        obs = observed_usage_readout(Path(args.oas), args.readout)
+        print(f"      okuma sekli: {args.readout}")
+    else:
+        obs = observed_usage(Path(args.oas), args.isotype)
     print(f"      {len(obs)} gen, {int(obs['n_donor'].max())} donor")
 
     print("[2/3] Model tablosu (RSS skorlari + katilim olasiligi)...")
