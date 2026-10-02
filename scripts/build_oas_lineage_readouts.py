@@ -96,6 +96,14 @@ def main() -> None:
             df.loc[idx, "lineage"] = labels + offset
             offset += len(sub)
 
+        # Persist the per-row lineage assignment so the permutation test can
+        # reuse it without recomputing the clustering.
+        lineage_dir = root / ".cache" / "oas_lineage"
+        lineage_dir.mkdir(parents=True, exist_ok=True)
+        df[["gene", "Redundancy", "v_identity", "lineage"]].to_csv(
+            lineage_dir / path.name, index=False
+        )
+
         size = df.groupby("lineage")["lineage"].transform("size")
         singleton = df[(size == 1) & (df["Redundancy"] == 1)]
 

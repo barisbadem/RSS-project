@@ -41,6 +41,16 @@ from scipy.stats import binomtest, spearmanr
 
 READOUTS = ["reads", "unique", "clones", "lineage", "singleton", "lowshm"]
 
+# IGHD4-4's entire 16-nt coding core (TGACTACAGTAACTAC) sits inside the
+# IGHD4-11 read, so no sequence-level D call can separate them and the
+# aligner's tie-break decides which gets credited. IGHD4-4 draws zero
+# lineages in 14 of 15 donors for that reason, not because it is unused.
+# Their RSS pairs differ (3' CACAGTGAT vs CATAGTGAT), so they cannot be
+# merged into one RSS unit either - both must stay out of any comparison
+# that claims to hold the RSS constant.
+INDISTINGUISHABLE = {"IGHD4-4", "IGHD4-11"}
+
+
 
 def matrix(df: pd.DataFrame, readout: str) -> pd.DataFrame:
     sub = df[df["readout"] == readout]
@@ -86,7 +96,7 @@ def main() -> None:
     skipped = []
     for gene in genes:
         key = (reference.get(f"{gene}|5"), reference.get(f"{gene}|3"))
-        if None in key:
+        if None in key or gene in INDISTINGUISHABLE:
             skipped.append(gene)
             continue
         groups[key].append(gene)
