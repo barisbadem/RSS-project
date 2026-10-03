@@ -27,24 +27,28 @@ Three things separate the two here.
   missing genes and reassigns which genes those are, so the null has the
   same amount of missingness and none of its structure.
 
-Two of the six genes cannot be scored for absence at all, which is why an
-all-six test returns nothing.
+All six are scored, but two of them need a gene-specific criterion rather
+than "has any call", because a retained paralog is otherwise credited to
+them.
 
-  IGHD4-4's entire 16-nt coding core sits inside the IGHD4-11 read, so a
-  read from the retained IGHD4-11 can be credited to IGHD4-4. It is called
-  in 100% of the well-covered set, deletion carriers included.
-  IGHD5-5 is written as the compound label IGHD5-18/5-5 when the caller
-  cannot separate it from the retained IGHD5-18, which credits it the same
-  way.
+  IGHD4-4's entire 16-nt coding core, TGACTACAGTAACTAC, also occurs inside
+  the IGHD4-11 read, so the bare core is credited to IGHD4-4 even when
+  IGHD4-4 is gone: deletion carriers all carry that core and none carries
+  the flank-bearing IGHD4-4 read, which is distinct from IGHD4-11's
+  (...CCACAGTGATGAACCCAGCAGCAAAAACTGACCGGACTCCCA against
+  ...CCATAGTGATGAACCCAGTG). IGHD4-4 is therefore scored on the
+  flank-bearing read only. This costs some sensitivity: 646 individuals
+  carry the core without a long read for reasons unrelated to the deletion.
+  IGHD5-5 is written as the compound label IGHD5-18/5-5 whenever the caller
+  cannot separate it from the retained IGHD5-18. It is scored on the
+  resolved IGHD5-5 label only, which no compound call can supply.
 
-So the signature is read off the four genes that CAN be scored - IGHD3-3,
-IGHD6-6, IGHD1-7, IGHD2-8 - with IGHD4-4 and IGHD5-5 reported but not
-required. An absent call means no allele on either chromosome, so what this
-counts is the HOMOZYGOUS deletion; heterozygotes still show the gene.
+An absent call means no allele on either chromosome, so what this counts is
+the HOMOZYGOUS deletion; heterozygotes still show the gene.
 
 This supersedes the note in build_deletion_block_analysis.py, which declined
-to report a frequency because an all-six proxy did not reproduce the
-published population skew. The four-gene signature does reproduce it.
+to report a frequency because an all-six proxy found nothing. That proxy
+credited both paralogs, so it could not have found a carrier.
 """
 
 from __future__ import annotations
@@ -68,21 +72,28 @@ GENOMIC_ORDER = [
     "IGHD6-25", "IGHD1-26", "IGHD7-27",
 ]
 BLOCK = ["IGHD3-3", "IGHD4-4", "IGHD5-5", "IGHD6-6", "IGHD1-7", "IGHD2-8"]
-# The four block genes no retained paralog can stand in for.
-SCOREABLE = ["IGHD3-3", "IGHD6-6", "IGHD1-7", "IGHD2-8"]
-UNSCOREABLE = {"IGHD4-4": "IGHD4-11", "IGHD5-5": "IGHD5-18"}
+SCOREABLE = BLOCK
 FLANKS = ["IGHD2-2", "IGHD3-9"]
+# A compound label credits every gene it could stand for - except the genes
+# in SPECIFIC, which a compound or shared-core read must never satisfy.
 COMPOUND = {"IGHD5-18/5-5": ["IGHD5-18", "IGHD5-5"]}
+# gene -> how presence must be established, because "any call" is not enough
+SPECIFIC = {
+    "IGHD4-4": "long",      # flank-bearing read; the bare core is IGHD4-11's too
+    "IGHD5-5": "resolved",  # the literal label, never the IGHD5-18/5-5 compound
+}
 MIN_COVERAGE = 0.90
 REPS = 2000
 SEED = 20261003
 
 
 def presence_matrix(rows: pd.DataFrame) -> pd.DataFrame:
-    """individual x gene boolean table of 'this gene has an allele call'.
+    """individual x gene boolean table of 'this gene is evidenced'.
 
-    A compound label credits every gene it could stand for, so an ambiguous
-    call never counts as an absence.
+    For most genes any call counts, and a compound label credits every gene
+    it could stand for, so an ambiguous call never reads as an absence. The
+    genes in SPECIFIC are the exception: they need evidence a retained
+    paralog cannot supply.
     """
     called = rows.groupby("sample_id")["gene"].apply(set)
     data = {}
@@ -91,7 +102,17 @@ def presence_matrix(rows: pd.DataFrame) -> pd.DataFrame:
         for gene in genes:
             expanded.update(COMPOUND.get(gene, [gene]))
         data[sample] = [g in expanded for g in GENOMIC_ORDER]
-    return pd.DataFrame.from_dict(data, orient="index", columns=GENOMIC_ORDER)
+    table = pd.DataFrame.from_dict(data, orient="index", columns=GENOMIC_ORDER)
+
+    for gene, rule in SPECIFIC.items():
+        if rule == "long":
+            ok = set(rows.loc[(rows.gene == gene) & rows.is_long, "sample_id"])
+        elif rule == "resolved":
+            ok = set(rows.loc[rows.gene == gene, "sample_id"])
+        else:
+            raise ValueError(rule)
+        table[gene] = table.index.isin(ok)
+    return table
 
 
 def main() -> None:
@@ -112,21 +133,16 @@ def main() -> None:
     sub = pres[keep]
     print(f"\nwell-covered set used below (call rate >= {MIN_COVERAGE:.2f}): {len(sub)}")
 
-    print("\n--- why an all-six test cannot work ---")
-    for gene, stand_in in UNSCOREABLE.items():
-        print(f"  {gene} called in {100 * sub[gene].mean():6.2f}% of the well-covered set "
-              f"({stand_in} can be credited to it)")
-
     missing = (~sub[SCOREABLE]).sum(axis=1)
-    print("\n--- how many of the four scoreable block genes are missing? ---")
+    print("\n--- how many of the six block genes are missing? ---")
     for k in range(len(SCOREABLE) + 1):
         n = int((missing == k).sum())
-        print(f"  {k} of 4 missing: {n:5d}  ({100 * n / len(sub):5.2f}%)")
+        print(f"  {k} of 6 missing: {n:5d}  ({100 * n / len(sub):5.2f}%)")
 
-    print("\n--- deletion signature: all four absent AND both flanks called ---")
+    print("\n--- deletion signature: all six absent AND both flanks called ---")
     flanks_ok = sub[FLANKS].all(axis=1)
     full = (missing == len(SCOREABLE)) & flanks_ok
-    print(f"  all four absent             : {int((missing == len(SCOREABLE)).sum())}")
+    print(f"  all six absent              : {int((missing == len(SCOREABLE)).sum())}")
     print(f"  ... with IGHD2-2 and IGHD3-9 called: {int(full.sum())} "
           f"({100 * full.mean():.2f}% of the well-covered set)")
 
