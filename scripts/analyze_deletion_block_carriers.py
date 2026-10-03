@@ -27,21 +27,25 @@ Three things separate the two here.
   missing genes and reassigns which genes those are, so the null has the
   same amount of missingness and none of its structure.
 
-All six are scored, but two of them need a gene-specific criterion rather
-than "has any call", because a retained paralog is otherwise credited to
-them.
+All six are scored, on one rule applied to every gene: a gene counts as
+present only when the individual carries a row whose db_name names that gene
+alone. KIARVA marks an unresolvable call by naming both candidates with a
+slash, so the rule needs no per-gene special case and no sequence
+comparison - it just declines to credit a gene on evidence the database
+itself says is ambiguous.
 
-  IGHD4-4's entire 16-nt coding core, TGACTACAGTAACTAC, also occurs inside
-  the IGHD4-11 read, so the bare core is credited to IGHD4-4 even when
-  IGHD4-4 is gone: deletion carriers all carry that core and none carries
-  the flank-bearing IGHD4-4 read, which is distinct from IGHD4-11's
-  (...CCACAGTGATGAACCCAGCAGCAAAAACTGACCGGACTCCCA against
-  ...CCATAGTGATGAACCCAGTG). IGHD4-4 is therefore scored on the
-  flank-bearing read only. This costs some sensitivity: 646 individuals
-  carry the core without a long read for reasons unrelated to the deletion.
-  IGHD5-5 is written as the compound label IGHD5-18/5-5 whenever the caller
-  cannot separate it from the retained IGHD5-18. It is scored on the
-  resolved IGHD5-5 label only, which no compound call can supply.
+That matters because "has any call" credits a deleted gene from its retained
+paralog, which is why an earlier all-six attempt found nothing. Three genes
+carry such labels:
+
+  IGHD4-4        IGHD4-11*01/IGHD4-4*01   2,345 individuals
+  IGHD5-18/5-5   IGHD5-18*01/IGHD5-5*01   2,193
+  IGHD4-17       IGHD4-17*01/IGHD4-4*01_S0251  2,112
+
+A carrier shows this directly. HG00443 has rows for 23 of 27 genes; of the
+six block genes the only row is IGHD4-4, labelled IGHD4-11*01/IGHD4-4*01,
+while IGHD3-3, IGHD6-6, IGHD1-7, IGHD2-8 and IGHD5-5 have no row at all and
+both flanking genes carry their own unambiguous reads.
 
 An absent call means no allele on either chromosome, so what this counts is
 the HOMOZYGOUS deletion; heterozygotes still show the gene.
@@ -74,45 +78,29 @@ GENOMIC_ORDER = [
 BLOCK = ["IGHD3-3", "IGHD4-4", "IGHD5-5", "IGHD6-6", "IGHD1-7", "IGHD2-8"]
 SCOREABLE = BLOCK
 FLANKS = ["IGHD2-2", "IGHD3-9"]
-# A compound label credits every gene it could stand for - except the genes
-# in SPECIFIC, which a compound or shared-core read must never satisfy.
-COMPOUND = {"IGHD5-18/5-5": ["IGHD5-18", "IGHD5-5"]}
-# gene -> how presence must be established, because "any call" is not enough
-SPECIFIC = {
-    "IGHD4-4": "long",      # flank-bearing read; the bare core is IGHD4-11's too
-    "IGHD5-5": "resolved",  # the literal label, never the IGHD5-18/5-5 compound
-}
+
 MIN_COVERAGE = 0.90
 REPS = 2000
 SEED = 20261003
 
 
 def presence_matrix(rows: pd.DataFrame) -> pd.DataFrame:
-    """individual x gene boolean table of 'this gene is evidenced'.
+    """individual x gene boolean table of 'this gene is unambiguously called'.
 
-    For most genes any call counts, and a compound label credits every gene
-    it could stand for, so an ambiguous call never reads as an absence. The
-    genes in SPECIFIC are the exception: they need evidence a retained
-    paralog cannot supply.
+    A db_name holding a slash names two candidate genes KIARVA could not
+    separate, so it is no evidence for either and is dropped. Everything
+    left names one gene.
     """
-    called = rows.groupby("sample_id")["gene"].apply(set)
-    data = {}
-    for sample, genes in called.items():
-        expanded = set()
-        for gene in genes:
-            expanded.update(COMPOUND.get(gene, [gene]))
-        data[sample] = [g in expanded for g in GENOMIC_ORDER]
+    resolved = rows[~rows["db_name"].astype(str).str.contains("/", regex=False)]
+    called = resolved.groupby("sample_id")["gene"].apply(set)
+    data = {
+        sample: [g in genes for g in GENOMIC_ORDER]
+        for sample, genes in called.items()
+    }
     table = pd.DataFrame.from_dict(data, orient="index", columns=GENOMIC_ORDER)
-
-    for gene, rule in SPECIFIC.items():
-        if rule == "long":
-            ok = set(rows.loc[(rows.gene == gene) & rows.is_long, "sample_id"])
-        elif rule == "resolved":
-            ok = set(rows.loc[rows.gene == gene, "sample_id"])
-        else:
-            raise ValueError(rule)
-        table[gene] = table.index.isin(ok)
-    return table
+    # Individuals whose every row was ambiguous vanish from the groupby.
+    missing = rows["sample_id"].unique()
+    return table.reindex(missing, fill_value=False)
 
 
 def main() -> None:
