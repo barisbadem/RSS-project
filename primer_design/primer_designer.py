@@ -13,6 +13,7 @@ and finally forward/reverse pairs are ranked.
 Usage:
     python primer_designer.py gene.fasta --organism "Escherichia coli"
     python primer_designer.py                       # paste FASTA, finish with an empty line
+    python primer_designer.py gene.fasta --organism "Escherichia coli" --accession NC_000913.3   # most specific
     python primer_designer.py gene.fasta --no-blast # local scoring only
     python primer_designer.py gene.fasta --organism "Bacillus subtilis" \
         --fwd-tail GGATCC --rev-tail AAGCTT         # add restriction sites (not scored/BLASTed)
@@ -140,15 +141,38 @@ def cross_dimer(f, r):
 
 
 # ---------------------------------------------------------------------- BLAST
-def blast_primer(seq, organism, db="nt", hitlist=50, retries=3):
-    """BLAST one primer (blastn-short) restricted to organism.
-    Returns list of (accession, title, aln_len, mismatches_incl_unaligned,
-    covers_3prime) for significant hits."""
+def make_entrez_query(organism, accession):
+    """Restrict BLAST to one reference sequence (best) or to an organism."""
+    if accession:
+        accs = [x.strip() for x in accession.split(",") if x.strip()]
+        return "(" + " OR ".join(f"{x}[ACCN]" for x in accs) + ")"
+    return f'"{organism}"[Organism]'
+
+
+def parse_hsp(acc, hsp, n):
+    """Turn one BLAST HSP into a binding-site record in subject coordinates,
+    extended to the full primer length (so unaligned 5' bases are accounted for)."""
+    plus = hsp.sbjct_start <= hsp.sbjct_end
+    mism = (hsp.align_length - hsp.identities) + (n - hsp.align_length)
+    # 3' end must be aligned and its last 3 bases must be identical
+    end3_ok = hsp.query_end == n and hsp.match.endswith("|||")
+    if plus:
+        low = hsp.sbjct_start - (hsp.query_start - 1)
+        high = hsp.sbjct_end + (n - hsp.query_end)
+    else:
+        high = hsp.sbjct_start + (hsp.query_start - 1)
+        low = hsp.sbjct_end - (n - hsp.query_end)
+    return dict(acc=acc, plus=plus, low=low, high=high, mism=mism, end3_ok=end3_ok)
+
+
+def blast_primer(seq, organism, accession=None, db="nt", hitlist=100, retries=3):
+    """BLAST one primer (blastn, short-query settings). Returns a list of
+    binding-site dicts, or None if NCBI could not be reached."""
     from Bio.Blast import NCBIWWW, NCBIXML
     kwargs = dict(program="blastn", database=db, sequence=seq, megablast=False,
                   expect=1000, word_size=7, hitlist_size=hitlist,
                   nucl_reward=1, nucl_penalty=-3, filter="F",
-                  entrez_query=f'"{organism}"[Organism]')
+                  entrez_query=make_entrez_query(organism, accession))
     for attempt in range(retries):
         try:
             handle = NCBIWWW.qblast(**kwargs)
@@ -159,24 +183,44 @@ def blast_primer(seq, organism, db="nt", hitlist=50, retries=3):
             time.sleep(15 * (attempt + 1))
     else:
         return None
-    hits = []
-    n = len(seq)
-    for aln in rec.alignments:
-        for hsp in aln.hsps:
-            mism = (hsp.align_length - hsp.identities) + (n - hsp.align_length)
-            covers3 = hsp.query_end == n  # 3' end of the primer is part of the match
-            hits.append((aln.accession, aln.title[:60], hsp.align_length, mism, covers3))
-    return hits
+    if len(rec.alignments) >= hitlist:
+        print(f"    WARNING: hit list full ({hitlist}); off-targets may be missing. "
+              f"Use --accession to search a single genome, or raise --hitlist.", file=sys.stderr)
+    return [parse_hsp(aln.accession, hsp, len(seq)) for aln in rec.alignments for hsp in aln.hsps]
 
 
-def specificity(hits):
-    """Off-target count: hits that could really prime (<=3 mismatches and
-    3' end matched). The intended gene site itself counts as 1 and is
-    subtracted; 0 is ideal."""
+def priming_sites(hits, max_mismatch):
+    """Sites where the primer could really be extended (few mismatches, clean 3' end)."""
+    return [h for h in hits if h["mism"] <= max_mismatch and h["end3_ok"]]
+
+
+def specificity(hits, max_mismatch=4):
+    """(off-target sites, perfect sites, priming sites).
+    Perfect full-length matches are the intended target (or its copies);
+    imperfect priming sites are off-targets."""
     if hits is None:
         return None
-    priming = [h for h in hits if h[3] <= 3 and h[4]]
-    return max(0, len(priming) - 1), len(priming)
+    sites = priming_sites(hits, max_mismatch)
+    perfect = [h for h in sites if h["mism"] == 0]
+    return dict(off=len(sites) - len(perfect), perfect=len(perfect), sites=sites)
+
+
+def unintended_products(res_f, res_r, expected_len, tol, max_size):
+    """Possible PCR products from F/R binding sites other than the intended
+    amplicon: a plus-strand site and a minus-strand site on the same sequence,
+    facing each other and <= max_size apart (like NCBI Primer-BLAST)."""
+    sites = res_f["sites"] + res_r["sites"]
+    plus = [x for x in sites if x["plus"]]
+    minus = [x for x in sites if not x["plus"]]
+    out = set()
+    for p in plus:
+        for m in minus:
+            if p["acc"] != m["acc"] or m["low"] <= p["low"]:
+                continue
+            size = m["high"] - p["low"] + 1
+            if size <= max_size and abs(size - expected_len) > tol:
+                out.add((p["acc"], p["low"], size))
+    return sorted(out)
 
 
 # ----------------------------------------------------------------------- main
@@ -199,7 +243,7 @@ def fmt(p, s, props, spec=None):
     t = f"{p}  len={props['len']} GC={props['gc']:.0f}% Tm={props['tm']:.1f} " \
         f"selfdimer={props['selfdimer']}/{props['selfdimer3']}(3') hairpin={props['hairpin']} score={s:.1f}"
     if spec is not None:
-        t += f" off-targets={spec[0]} (priming hits={spec[1]})"
+        t += f" | BLAST: target sites={spec['perfect']}, off-target sites={spec['off']}"
     return t
 
 
@@ -211,6 +255,13 @@ def main():
     ap.add_argument("--max-len", type=int, default=30)
     ap.add_argument("--top", type=int, default=99,
                     help="max primers per side to BLAST, best local score first (default: all)")
+    ap.add_argument("--accession", help="reference genome accession(s), comma separated, e.g. NC_000913.3 "
+                    "(MOST ACCURATE: BLAST only that genome, so strain copies of the gene don't hide off-targets)")
+    ap.add_argument("--hitlist", type=int, default=100, help="BLAST hits kept per primer (default 100)")
+    ap.add_argument("--max-mismatch", type=int, default=4,
+                    help="a site with <= this many mismatches and a clean 3' end counts as a priming site (default 4)")
+    ap.add_argument("--max-product", type=int, default=5000,
+                    help="unintended products up to this size (bp) are counted (default 5000)")
     ap.add_argument("--db", default="nt", help="BLAST database (default nt; try refseq_rna / core_nt)")
     ap.add_argument("--no-blast", action="store_true", help="local scoring only")
     ap.add_argument("--omit", choices=["no", "start", "stop", "both"],
@@ -238,6 +289,9 @@ def main():
         a.organism = input("Organism for BLAST (e.g. Escherichia coli; empty = skip BLAST): ").strip()
         if not a.organism:
             a.no_blast = True
+        elif not a.accession:
+            a.accession = input("Reference genome accession, e.g. NC_000913.3 (recommended, more specific; "
+                                "empty = search the whole organism): ").strip() or None
     START, STOP = ("ATG", "GTG", "TTG"), ("TAA", "TAG", "TGA")
     if a.omit is None:
         a.omit = ask_omit()
@@ -280,9 +334,10 @@ def main():
                 if p in blast_res:
                     continue
                 print(f"BLASTing {side}: {p} ...", file=sys.stderr)
-                blast_res[p] = specificity(blast_primer(p, a.organism, a.db))
+                blast_res[p] = specificity(blast_primer(p, a.organism, a.accession, a.db, a.hitlist),
+                                           a.max_mismatch)
                 done += 1
-                if blast_res[p] is not None and blast_res[p][0] == 0:
+                if blast_res[p] is not None and blast_res[p]["off"] == 0:
                     clean += 1
                 time.sleep(5)  # be polite to NCBI
 
@@ -296,18 +351,29 @@ def main():
             cd_all, cd_3f, cd_3r = cross_dimer(f, r)
             total = sf + sr - 3 * max(0, tm_diff - 2) - 3 * max(0, cd_all - 4) \
                     - 6 * max(0, max(cd_3f, cd_3r) - 3)
+            unint = []
             if not a.no_blast:
                 for p in (f, r):
                     spec = blast_res[p]
-                    total -= 25 * spec[0] if spec else 10  # failed BLAST: mild penalty
-            pairs.append((total, f, pf, sf, r, pr, sr, tm_diff, cd_all))
+                    total -= 5 * min(spec["off"], 10) if spec else 10  # failed BLAST: mild penalty
+                if blast_res[f] and blast_res[r]:
+                    unint = unintended_products(blast_res[f], blast_res[r], len(gene),
+                                                2 * a.max_len, a.max_product)
+                    total -= 40 * min(len(unint), 5)   # a real unintended amplicon is the worst problem
+            pairs.append((total, f, pf, sf, r, pr, sr, tm_diff, cd_all, unint))
     pairs.sort(key=lambda x: -x[0])
 
     print("\n===== BEST PRIMER PAIRS =====")
-    for rank, (tot, f, pf, sf, r, pr, sr, td, cd) in enumerate(pairs[:5], 1):
+    for rank, (tot, f, pf, sf, r, pr, sr, td, cd, unint) in enumerate(pairs[:5], 1):
         print(f"\n#{rank}  pair score {tot:.1f}  (Tm diff {td:.1f} C, F/R cross-dimer {cd})")
         print("  F:", a.fwd_tail.upper() + "-" if a.fwd_tail else "", fmt(f, sf, pf, blast_res.get(f)), sep="")
         print("  R:", a.rev_tail.upper() + "-" if a.rev_tail else "", fmt(r, sr, pr, blast_res.get(r)), sep="")
+        if not a.no_blast:
+            if unint:
+                print(f"  !! {len(unint)} possible UNINTENDED product(s): " +
+                      ", ".join(f"{acc}:{pos} ({size} bp)" for acc, pos, size in unint[:3]))
+            else:
+                print("  No unintended PCR products found in BLAST hits.")
         print(f"  Full F: 5'-{a.fwd_tail.upper()}{f}-3'")
         print(f"  Full R: 5'-{a.rev_tail.upper()}{r}-3'")
     if not pairs:
