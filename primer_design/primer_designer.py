@@ -194,7 +194,8 @@ def main():
     ap.add_argument("--organism", help='e.g. "Escherichia coli" (needed for BLAST)')
     ap.add_argument("--min-len", type=int, default=15)
     ap.add_argument("--max-len", type=int, default=30)
-    ap.add_argument("--top", type=int, default=4, help="primers per side to BLAST (default 4)")
+    ap.add_argument("--top", type=int, default=99,
+                    help="max primers per side to BLAST, best local score first (default: all)")
     ap.add_argument("--db", default="nt", help="BLAST database (default nt; try refseq_rna / core_nt)")
     ap.add_argument("--no-blast", action="store_true", help="local scoring only")
     ap.add_argument("--fwd-tail", default="", help="5' extension for forward primer (e.g. restriction site)")
