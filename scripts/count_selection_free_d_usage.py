@@ -92,11 +92,19 @@ def nonproductive(repertoire_id: str, extra: list[dict]) -> dict:
 
 
 def gene_of(call: str | None) -> str | None:
-    """One gene name, or None when the call spans more than one gene."""
+    """One locus gene name, or None when the call is unusable.
+
+    IGHD*/OR15-* and OR16-* are orphons: IMGT places them on chromosomes 15
+    and 16, outside the IGH locus, so they cannot be recombined into a heavy
+    chain and a call for one is a misassignment away from a locus gene.
+    """
     if not call:
         return None
     genes = {part.split("*")[0].strip() for part in call.split(",")}
-    return genes.pop() if len(genes) == 1 else None
+    if len(genes) != 1:
+        return None
+    gene = genes.pop()
+    return None if "/OR" in gene else gene
 
 
 def count_out_of_frame(repertoire_id: str) -> tuple[Counter, int, bool]:
