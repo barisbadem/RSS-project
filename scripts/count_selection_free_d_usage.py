@@ -41,6 +41,12 @@ end of the data, so one transient error ended the loop at 58,000 of 147,177
 in-frame records and the truncated count was reported as complete. A page
 that still fails after RETRIES attempts now marks the repertoire incomplete
 instead of quietly shortening it.
+
+Results are appended after each repertoire, and a repertoire already in the
+output file is skipped. This session runs in an ephemeral cloud container:
+a first cohort run reached 73 of 483 repertoires over about an hour and lost
+all of it when the container was reclaimed, because the script only wrote at
+the end. Writing as it goes makes the run resumable by re-invoking it.
 """
 
 from __future__ import annotations
@@ -162,28 +168,40 @@ def main() -> None:
     print(f"{len(reps)} repertoires, {reps.subj.nunique()} subjects, "
           f"{reps.study.nunique()} studies, mode={args.mode}\n", flush=True)
 
-    rows, failures = [], []
+    out_path = root / args.out
+    out_path.parent.mkdir(exist_ok=True)
+    done: set[str] = set()
+    if out_path.exists():
+        done = set(pd.read_csv(out_path)["repertoire"].astype(str))
+        print(f"resuming: {len(done)} repertoires already in {out_path}\n", flush=True)
+    else:
+        out_path.write_text("study,subject,repertoire,gene,out_of_frame,junction_stop\n")
+
+    failures = []
     for i, rep in enumerate(reps.itertuples(), 1):
+        if rep.rep in done:
+            continue
         oof, oof_amb, ok = count_out_of_frame(rep.rep)
         stops, stop_amb, scanned, stops_ok = Counter(), 0, 0, True
         if args.mode == "both":
             stops, stop_amb, scanned, stops_ok = count_junction_stops(rep.rep)
         if not (ok and stops_ok):
             failures.append(rep.rep)
-        for gene in set(oof) | set(stops):
-            rows.append({"study": rep.study, "subject": rep.subj, "repertoire": rep.rep,
-                         "gene": gene, "out_of_frame": oof[gene],
-                         "junction_stop": stops[gene]})
+            continue
+        # Appended per repertoire so a reclaimed container costs one row set,
+        # not the whole run.
+        with out_path.open("a") as handle:
+            for gene in sorted(set(oof) | set(stops)):
+                handle.write(f"{rep.study},{rep.subj},{rep.rep},{gene},"
+                             f"{oof[gene]},{stops[gene]}\n")
         print(f"[{i}/{len(reps)}] {rep.study:18s} {rep.subj:12s} "
               f"oof={sum(oof.values()):>8,} stop={sum(stops.values()):>7,} "
               f"amb={oof_amb + stop_amb:>6,}{'' if ok and stops_ok else '  INCOMPLETE'}",
               flush=True)
 
-    frame = pd.DataFrame(rows)
-    out_path = root / args.out
-    out_path.parent.mkdir(exist_ok=True)
-    frame.to_csv(out_path, index=False)
-    print(f"\nwrote {out_path}  ({len(frame)} rows)")
+    frame = pd.read_csv(out_path)
+    print(f"\n{out_path}: {len(frame)} rows, "
+          f"{frame.repertoire.nunique()} repertoires, {frame.subject.nunique()} subjects")
     if failures:
         print(f"INCOMPLETE repertoires ({len(failures)}): {failures}")
 
