@@ -12,7 +12,7 @@ and finally forward/reverse pairs are ranked.
 
 Usage:
     python primer_designer.py gene.fasta --organism "Escherichia coli"
-    python primer_designer.py                       # paste FASTA, finish with Ctrl-D
+    python primer_designer.py                       # paste FASTA, finish with an empty line
     python primer_designer.py gene.fasta --no-blast # local scoring only
     python primer_designer.py gene.fasta --organism "Bacillus subtilis" \
         --fwd-tail GGATCC --rev-tail AAGCTT         # add restriction sites (not scored/BLASTed)
@@ -204,9 +204,22 @@ def main():
     if a.fasta:
         text = open(a.fasta).read()
     else:
-        print("Paste FASTA, then press Ctrl-D (Ctrl-Z + Enter on Windows):", file=sys.stderr)
-        text = sys.stdin.read()
+        print("Paste the FASTA, then press Enter on an empty line to continue:", file=sys.stderr)
+        lines = []
+        while True:
+            try:
+                line = input()
+            except EOFError:
+                break
+            if not line.strip() and lines:
+                break
+            lines.append(line)
+        text = "\n".join(lines)
     name, gene = read_fasta(text)
+    if not a.no_blast and not a.organism:
+        a.organism = input("Organism for BLAST (e.g. Escherichia coli; empty = skip BLAST): ").strip()
+        if not a.organism:
+            a.no_blast = True
     if len(gene) < 2 * a.max_len:
         sys.exit("Gene too short for these primer lengths.")
     print(f"Gene: {name}, {len(gene)} bp. Product will be exactly {len(gene)} bp "
