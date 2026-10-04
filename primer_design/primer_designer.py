@@ -180,6 +180,21 @@ def specificity(hits):
 
 
 # ----------------------------------------------------------------------- main
+def ask_omit():
+    """Ask whether to drop the start and/or stop codon. Returns no/start/stop/both."""
+    answers = {"no": "no", "n": "no", "hayir": "no", "hayır": "no", "h": "no",
+               "start": "start", "only start": "start", "s": "start",
+               "stop": "stop", "only stop": "stop",
+               "yes": "both", "y": "both", "evet": "both", "e": "both", "both": "both"}
+    while True:
+        r = input("Omit start/stop codon from the gene ends?\n"
+                  "  no = keep both | start = omit only start | stop = omit only stop | yes = omit both\n> "
+                  ).strip().lower()
+        if r in answers:
+            return answers[r]
+        print("Please answer: no / start / stop / yes")
+
+
 def fmt(p, s, props, spec=None):
     t = f"{p}  len={props['len']} GC={props['gc']:.0f}% Tm={props['tm']:.1f} " \
         f"selfdimer={props['selfdimer']}/{props['selfdimer3']}(3') hairpin={props['hairpin']} score={s:.1f}"
@@ -198,6 +213,8 @@ def main():
                     help="max primers per side to BLAST, best local score first (default: all)")
     ap.add_argument("--db", default="nt", help="BLAST database (default nt; try refseq_rna / core_nt)")
     ap.add_argument("--no-blast", action="store_true", help="local scoring only")
+    ap.add_argument("--omit", choices=["no", "start", "stop", "both"],
+                    help="omit start and/or stop codon from the amplified region (asked interactively if not given)")
     ap.add_argument("--fwd-tail", default="", help="5' extension for forward primer (e.g. restriction site)")
     ap.add_argument("--rev-tail", default="", help="5' extension for reverse primer")
     a = ap.parse_args()
@@ -221,12 +238,25 @@ def main():
         a.organism = input("Organism for BLAST (e.g. Escherichia coli; empty = skip BLAST): ").strip()
         if not a.organism:
             a.no_blast = True
+    START, STOP = ("ATG", "GTG", "TTG"), ("TAA", "TAG", "TGA")
+    if a.omit is None:
+        a.omit = ask_omit()
+    if a.omit in ("start", "both"):
+        if gene[:3] in START:
+            gene = gene[3:]
+        else:
+            print(f"WARNING: gene starts with {gene[:3]}, not a start codon - nothing removed from the start.",
+                  file=sys.stderr)
+    if a.omit in ("stop", "both"):
+        if gene[-3:] in STOP:
+            gene = gene[:-3]
+        else:
+            print(f"WARNING: gene ends with {gene[-3:]}, not a stop codon - nothing removed from the end.",
+                  file=sys.stderr)
     if len(gene) < 2 * a.max_len:
         sys.exit("Gene too short for these primer lengths.")
-    print(f"Gene: {name}, {len(gene)} bp. Product will be exactly {len(gene)} bp "
-          f"(+{len(a.fwd_tail) + len(a.rev_tail)} bp tails).")
-    if not gene.startswith("ATG") and not gene.startswith(("GTG", "TTG")):
-        print("WARNING: gene does not start with a start codon.", file=sys.stderr)
+    print(f"Gene: {name}. Amplified region: {len(gene)} bp (omit: {a.omit}). "
+          f"Product will be exactly {len(gene)} bp (+{len(a.fwd_tail) + len(a.rev_tail)} bp tails).")
 
     fwd, rev = candidates(gene, a.min_len, a.max_len)
     scored = {"F": sorted(((*score_primer(p), p) for p in fwd), key=lambda x: -x[0]),
