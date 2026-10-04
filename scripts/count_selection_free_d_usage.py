@@ -1,75 +1,88 @@
 #!/usr/bin/env python3
 """IGHD usage in rearrangements that selection never saw.
 
-A rearrangement the cell could not translate was never judged: it builds no
-receptor, signals nothing, binds nothing. Whichever D it carries is RAG's
-choice alone, kept only because the cell survived on its other chromosome.
-Two classes qualify, and both arise at recombination rather than later:
+A rearrangement the cell cannot translate builds no receptor, signals
+nothing and binds nothing, so whichever D it carries is RAG's choice alone -
+it survived only because the other chromosome worked. Every earlier test in
+this project ran on productive sequences, leaving "selection may be masking
+a real RSS effect" open. This closes it.
 
-  out_of_frame   the junction's length is not a multiple of three, so
-                 everything downstream is frameshifted. Caused by the
-                 trimming and N-addition at the join itself.
-  junction_stop  the junction is in frame but contains a stop codon within
-                 the joint, which the non-templated additions produced.
+Two classes qualify, both arising at the join rather than later:
 
-A stop in the V region OUTSIDE the junction is excluded: somatic
-hypermutation can create one in a cell that was productive, and therefore
-selected, beforehand.
+  out_of_frame   junction length not a multiple of three
+  junction_stop  junction in frame but carrying a stop within the joint
 
-Three facts about the data shape the implementation.
+A stop in V outside the junction is excluded: hypermutation can create one
+in a cell that was productive, and therefore selected, beforehand. In the
+first repertoire measured, 87.3% of in-frame non-productive records have a
+clean junction and are dropped for exactly this reason.
+
+Three properties of the data drive the implementation.
 
   vj_in_frame and stop_codon are null on every VDJServer record, so a filter
-  on them silently returns nothing. The frame is computed from
-  junction_length instead. The positive control holds exactly: all 1,335,962
-  productive records in the probed repertoire have a junction length
-  divisible by three, without a single exception.
+  on them returns nothing while the data is present. The frame comes from
+  junction_length, and the positive control is exact: all 1,335,962
+  productive records in the probed repertoire divide by three, no exception.
   A "productive = false" record is often a failed annotation. 17,260 of them
-  in the probed repertoire carry a junction under 15 nt - median 5, with a
-  one-residue junction_aa - against a median of 48 for real ones. Counting D
-  genes over those would measure the aligner.
+  in that repertoire carry a junction under 15 nt - median 5, a one-residue
+  junction_aa - against median 48 for real ones, so 15 nt is the floor.
   The API rejects a filter containing "*", so junction stops cannot be
-  selected server-side. In-frame records are paged through and filtered
-  locally.
+  selected server-side. Those records are paged and filtered locally; the
+  out-of-frame class needs one facet call and takes about three seconds.
 
-Paralogs are reported as found, not merged: IGHD4-4 and IGHD4-11 share a
-coding core, as do IGHD5-5 and IGHD5-18, and an aligner credits whichever it
-breaks ties toward. Which one it picks differs between datasets - OAS credits
-IGHD4-11 and gives IGHD4-4 almost nothing, this pipeline does the reverse -
-so the pair must be read as one unit downstream.
+Paging is partitioned by junction_length rather than run over the whole
+class, because a deep offset is punishingly slow on this API: a page at
+from=0 returns in 0.8 s and one at from=100000 in 38 s. Splitting by length
+keeps every offset shallow and cuts a repertoire from roughly an hour to
+four minutes.
+
+Every request retries. An earlier version treated a failed request as the
+end of the data, so one transient error ended the loop at 58,000 of 147,177
+in-frame records and the truncated count was reported as complete. A page
+that still fails after RETRIES attempts now marks the repertoire incomplete
+instead of quietly shortening it.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
-import sys
+import time
 from collections import Counter
 from pathlib import Path
 
+import pandas as pd
+
+HOST = "https://vdjserver.org"
 MIN_JUNCTION = 15
+MAX_JUNCTION = 150
 PAGE = 1000
 TIMEOUT = 300
-MAX_LEN = 150
+RETRIES = 4
 
 
-def adc_post(host: str, body: dict) -> dict | None:
-    proc = subprocess.run(
-        ["curl", "-sS", "--max-time", str(TIMEOUT), "-H", "Content-Type: application/json",
-         "-d", json.dumps(body), f"{host}/airr/v1/rearrangement"],
-        capture_output=True, text=True,
-    )
-    try:
-        return json.loads(proc.stdout)
-    except Exception:
-        return None
+def adc_post(body: dict) -> dict | None:
+    """One ADC request, retried with backoff. None means it never succeeded."""
+    for attempt in range(RETRIES):
+        proc = subprocess.run(
+            ["curl", "-sS", "--max-time", str(TIMEOUT), "-H", "Content-Type: application/json",
+             "-d", json.dumps(body), f"{HOST}/airr/v1/rearrangement"],
+            capture_output=True, text=True,
+        )
+        try:
+            return json.loads(proc.stdout)
+        except Exception:
+            if attempt < RETRIES - 1:
+                time.sleep(2 ** attempt)
+    return None
 
 
-def base_filter(repertoire_id: str, lengths: list[int]) -> dict:
+def nonproductive(repertoire_id: str, extra: list[dict]) -> dict:
     return {"op": "and", "content": [
         {"op": "=", "content": {"field": "repertoire_id", "value": repertoire_id}},
         {"op": "=", "content": {"field": "productive", "value": False}},
-        {"op": "in", "content": {"field": "junction_length", "value": lengths}},
-    ]}
+    ] + extra}
 
 
 def gene_of(call: str | None) -> str | None:
@@ -80,81 +93,99 @@ def gene_of(call: str | None) -> str | None:
     return genes.pop() if len(genes) == 1 else None
 
 
-def count_out_of_frame(host: str, repertoire_id: str) -> tuple[Counter, int]:
-    """Faceted, so the whole class is counted without paging."""
-    lengths = [n for n in range(MIN_JUNCTION, MAX_LEN) if n % 3]
-    body = {"filters": base_filter(repertoire_id, lengths), "facets": "d_call"}
-    out = adc_post(host, body)
+def count_out_of_frame(repertoire_id: str) -> tuple[Counter, int, bool]:
+    lengths = [n for n in range(MIN_JUNCTION, MAX_JUNCTION) if n % 3]
+    body = {"filters": nonproductive(repertoire_id,
+            [{"op": "in", "content": {"field": "junction_length", "value": lengths}}]),
+            "facets": "d_call"}
+    out = adc_post(body)
+    if out is None or "Facet" not in out:
+        return Counter(), 0, False
     counts, ambiguous = Counter(), 0
-    for row in (out or {}).get("Facet", []):
+    for row in out["Facet"]:
         gene = gene_of(row.get("d_call"))
         if gene:
             counts[gene] += row["count"]
         else:
             ambiguous += row["count"]
-    return counts, ambiguous
+    return counts, ambiguous, True
 
 
-def count_junction_stops(host: str, repertoire_id: str) -> tuple[Counter, int, int]:
-    """Paged, because a filter containing "*" is rejected by the API."""
-    lengths = [n for n in range(MIN_JUNCTION, MAX_LEN) if n % 3 == 0]
-    counts, ambiguous, scanned = Counter(), 0, 0
-    offset = 0
-    while True:
-        body = {"filters": base_filter(repertoire_id, lengths),
-                "fields": ["d_call", "junction_aa"], "size": PAGE, "from": offset}
-        out = adc_post(host, body)
-        rows = (out or {}).get("Rearrangement")
-        if not rows:
-            break
-        scanned += len(rows)
-        for row in rows:
-            if "*" not in (row.get("junction_aa") or ""):
-                continue
-            gene = gene_of(row.get("d_call"))
-            if gene:
-                counts[gene] += 1
-            else:
-                ambiguous += 1
-        if len(rows) < PAGE:
-            break
-        offset += PAGE
-        if offset % 20000 == 0:
-            print(f"    scanned {scanned:,} in-frame records, "
-                  f"{sum(counts.values()):,} junction stops", flush=True)
-    return counts, ambiguous, scanned
+def count_junction_stops(repertoire_id: str) -> tuple[Counter, int, int, bool]:
+    """Paged per junction length, so no offset ever grows deep."""
+    counts, ambiguous, scanned, complete = Counter(), 0, 0, True
+    for length in range(MIN_JUNCTION, MAX_JUNCTION):
+        if length % 3:
+            continue
+        offset = 0
+        while True:
+            body = {"filters": nonproductive(repertoire_id,
+                    [{"op": "=", "content": {"field": "junction_length", "value": length}}]),
+                    "fields": ["d_call", "junction_aa"], "size": PAGE, "from": offset}
+            out = adc_post(body)
+            if out is None:
+                complete = False
+                break
+            rows = out.get("Rearrangement") or []
+            scanned += len(rows)
+            for row in rows:
+                if "*" not in (row.get("junction_aa") or ""):
+                    continue
+                gene = gene_of(row.get("d_call"))
+                if gene:
+                    counts[gene] += 1
+                else:
+                    ambiguous += 1
+            if len(rows) < PAGE:
+                break
+            offset += PAGE
+    return counts, ambiguous, scanned, complete
 
 
 def main() -> None:
-    host = "https://vdjserver.org"
-    repertoire_id = (sys.argv[1] if len(sys.argv) > 1
-                     else "2192441437831228950-242ac113-0001-012")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", choices=["out_of_frame", "both"], default="out_of_frame")
+    ap.add_argument("--studies", nargs="*", help="limit to these study ids")
+    ap.add_argument("--limit", type=int, help="first N repertoires only")
+    ap.add_argument("--out", default="results/selection_free_d_usage.csv")
+    args = ap.parse_args()
+
     root = Path(__file__).resolve().parent.parent
+    survey = pd.read_csv(root / "results" / "ADC_nonproductive_survey.csv")
+    usable = survey[(survey["out_of_frame"].fillna(0) > 1000) & (survey["host"] == "vdjserver")]
+    reps = pd.read_csv(root / ".cache" / "adc_repertoires.csv")
+    reps = reps[reps["study"].isin(usable["study"]) & (reps["host"] == "vdjserver")]
+    if args.studies:
+        reps = reps[reps["study"].isin(args.studies)]
+    if args.limit:
+        reps = reps.head(args.limit)
+    print(f"{len(reps)} repertoires, {reps.subj.nunique()} subjects, "
+          f"{reps.study.nunique()} studies, mode={args.mode}\n", flush=True)
 
-    print(f"repertoire {repertoire_id}\n")
-    oof, oof_amb = count_out_of_frame(host, repertoire_id)
-    print(f"out_of_frame   : {sum(oof.values()):,} assigned, {oof_amb:,} ambiguous")
+    rows, failures = [], []
+    for i, rep in enumerate(reps.itertuples(), 1):
+        oof, oof_amb, ok = count_out_of_frame(rep.rep)
+        stops, stop_amb, scanned, stops_ok = Counter(), 0, 0, True
+        if args.mode == "both":
+            stops, stop_amb, scanned, stops_ok = count_junction_stops(rep.rep)
+        if not (ok and stops_ok):
+            failures.append(rep.rep)
+        for gene in set(oof) | set(stops):
+            rows.append({"study": rep.study, "subject": rep.subj, "repertoire": rep.rep,
+                         "gene": gene, "out_of_frame": oof[gene],
+                         "junction_stop": stops[gene]})
+        print(f"[{i}/{len(reps)}] {rep.study:18s} {rep.subj:12s} "
+              f"oof={sum(oof.values()):>8,} stop={sum(stops.values()):>7,} "
+              f"amb={oof_amb + stop_amb:>6,}{'' if ok and stops_ok else '  INCOMPLETE'}",
+              flush=True)
 
-    stops, stop_amb, scanned = count_junction_stops(host, repertoire_id)
-    print(f"junction_stop  : {sum(stops.values()):,} assigned, {stop_amb:,} ambiguous "
-          f"(from {scanned:,} in-frame records)")
-
-    total = oof + stops
-    grand = sum(total.values())
-    print(f"\nselection-free total: {grand:,}\n")
-    print(f"{'rank':>4}  {'gene':11s} {'out_of_frame':>13} {'junction_stop':>14} "
-          f"{'total':>8} {'pct':>7}")
-    for rank, (gene, n) in enumerate(total.most_common(), 1):
-        print(f"{rank:>4}  {gene:11s} {oof[gene]:>13,} {stops[gene]:>14,} "
-              f"{n:>8,} {100 * n / grand:>6.2f}%")
-
-    out_path = root / "results" / "selection_free_d_usage.csv"
+    frame = pd.DataFrame(rows)
+    out_path = root / args.out
     out_path.parent.mkdir(exist_ok=True)
-    with out_path.open("w") as handle:
-        handle.write("repertoire_id,gene,out_of_frame,junction_stop,total\n")
-        for gene, n in total.most_common():
-            handle.write(f"{repertoire_id},{gene},{oof[gene]},{stops[gene]},{n}\n")
-    print(f"\nwrote {out_path}")
+    frame.to_csv(out_path, index=False)
+    print(f"\nwrote {out_path}  ({len(frame)} rows)")
+    if failures:
+        print(f"INCOMPLETE repertoires ({len(failures)}): {failures}")
 
 
 if __name__ == "__main__":
