@@ -49,7 +49,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from vdj_bias.d_assignment import assign_d
+from vdj_bias.d_assignment_fast import GermlinePanel, assign_d_fast
 
 HOST = "https://vdjserver.org"
 MIN_JUNCTION = 15
@@ -136,13 +136,14 @@ def fetch_out_of_frame(repertoire_id: str, cap: int) -> tuple[list[str], bool]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cap", type=int, default=2000,
+    ap.add_argument("--cap", type=int, default=1000,
                     help="distinct junctions per repertoire")
     ap.add_argument("--out", default="results/d_usage_own_assignment.csv")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parent.parent
     germlines = json.loads((root / ".cache" / "d_germline_cores.json").read_text())
+    panel = GermlinePanel(germlines)
     survey = pd.read_csv(root / "results" / "ADC_nonproductive_survey.csv")
     usable = survey[(survey["out_of_frame"].fillna(0) > 1000) & (survey["host"] == "vdjserver")]
     reps = pd.read_csv(root / ".cache" / "adc_repertoires.csv")
@@ -171,7 +172,7 @@ def main() -> None:
         ambiguous: Counter = Counter()
         no_call = 0
         for junction in junctions:
-            call = assign_d(junction, germlines)
+            call = assign_d_fast(junction, panel)
             if call.status == "called":
                 called[call.genes[0]] += 1
             elif call.status == "ambiguous":
