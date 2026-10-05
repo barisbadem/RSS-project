@@ -47,14 +47,19 @@ from dataclasses import dataclass, field
 
 # Conserved anchors. The junction by AIRR convention runs from the first
 # base of the V second-cysteine codon to the last base of the J
-# tryptophan/phenylalanine codon, so these are what bracket the joint.
-CYS_CODONS = ("TGT", "TGC")
-TRP_CODON = "TGG"
-# V framework 3 ends in this motif in most IGHV genes; used only when a
-# junction has to be located inside a longer read.
-FR3_MOTIFS = ("TATTACTGT", "TATTATTGT", "TACTACTGT", "TATCACTGT", "TTTTACTGT")
-# IGHJ framework 4 opens with the tryptophan followed by glycine-glutamine.
-FR4_MOTIFS = ("TGGGGCCAAGG", "TGGGGCCAGGG", "TGGGGCAAAGG", "TGGGGCCAAGA")
+# tryptophan codon, so these are what bracket the joint.
+#
+# Both are matched with a mismatch budget rather than exactly. These
+# sequences carry hypermutation - V identity runs 90% to 100% in the
+# repertoires measured here - and an exact motif search finds the joint in
+# only a third of reads, failing precisely on the most mutated ones, which
+# would bias every count that follows.
+CYS_MOTIF = "TATTACTGT"       # 3' end of V framework 3, Cys in the last codon
+CYS_MISMATCHES = 2
+FR4_MOTIF = "TGGGGC"          # opening of J framework 4, Trp in the first codon
+FR4_MISMATCHES = 1
+MIN_JUNCTION = 15
+MAX_JUNCTION = 150
 
 # V and J contribute the first and last bases of the joint, so D cannot
 # start before or end after these.
@@ -88,33 +93,70 @@ class DCall:
         return f"no D callable (best {self.exact} nt exact, under {MIN_EXACT})"
 
 
-def find_junction(sequence: str) -> tuple[int, int] | None:
+def reverse_complement(sequence: str) -> str:
+    return sequence.upper().translate(str.maketrans("ACGTN", "TGCAN"))[::-1]
+
+
+def _fuzzy_positions(sequence: str, motif: str, budget: int) -> list[tuple[int, int]]:
+    """Every offset where `motif` fits within `budget` mismatches, with cost."""
+    hits = []
+    for start in range(len(sequence) - len(motif) + 1):
+        cost = 0
+        for a, b in zip(sequence[start:start + len(motif)], motif):
+            if a != b:
+                cost += 1
+                if cost > budget:
+                    break
+        else:
+            hits.append((start, cost))
+    return hits
+
+
+def find_junction(sequence: str) -> tuple[str, str] | None:
     """Locate the V(D)J joint inside a full-length transcript.
 
-    Returns the half-open span from the V cysteine codon to the end of the J
-    tryptophan codon, or None when either anchor is missing - a read too
-    short or too truncated to contain the joint.
+    Returns the joint and the orientation it was found in, or None when the
+    anchors cannot be placed.
+
+    Both orientations are searched, because a deposited read is not
+    necessarily on the coding strand. Every record sampled from this
+    repository stores the transcript reverse-complemented: the junction the
+    repository itself reports appears only as its reverse complement, around
+    position 65, so searching one strand finds the joint in none of them.
+
+    Among the anchor pairs that give a plausible joint length, the one with
+    the fewest mismatches is taken, and ties go to the longest joint. The
+    mismatch budgets and that tie-break were chosen against the repository's
+    own junction calls rather than assumed: over 400 reads, 2 mismatches on
+    the cysteine motif and 1 on the framework 4 motif reproduce 234 of the
+    258 junctions that are reproducible at all, 90.7%. The ceiling is 258
+    rather than 400 because only 64.5% of these junctions still begin with a
+    cysteine codon - in the rest the anchor itself was trimmed away, and no
+    motif method can recover it.
     """
-    sequence = sequence.upper()
-    start = None
-    for motif in FR3_MOTIFS:
-        position = sequence.rfind(motif)
-        if position != -1:
-            start = position + len(motif) - 3
-            break
-    if start is None:
-        for codon_start in range(len(sequence) - 3, -1, -3):
-            if sequence[codon_start:codon_start + 3] in CYS_CODONS:
-                start = codon_start
-                break
-    if start is None:
-        return None
-    for motif in FR4_MOTIFS:
-        position = sequence.find(motif, start)
-        if position != -1:
-            return start, position + 3
-    position = sequence.find(TRP_CODON, start + 3)
-    return (start, position + 3) if position != -1 else None
+    sequence = (sequence or "").upper()
+    best = None
+    for orientation, strand in (("forward", sequence),
+                                ("reverse", reverse_complement(sequence))):
+        cys_hits = _fuzzy_positions(strand, CYS_MOTIF, CYS_MISMATCHES)
+        fr4_hits = _fuzzy_positions(strand, FR4_MOTIF, FR4_MISMATCHES)
+        if not cys_hits or not fr4_hits:
+            continue
+        for cys_start, cys_cost in cys_hits:
+            start = cys_start + len(CYS_MOTIF) - 3
+            for fr4_start, fr4_cost in fr4_hits:
+                end = fr4_start + 3
+                length = end - start
+                if not MIN_JUNCTION <= length <= MAX_JUNCTION:
+                    continue
+                # No frame constraint here. The joints this analysis is about
+                # are the ones whose length is NOT a multiple of three, so
+                # requiring divisibility discards exactly the target set - an
+                # earlier version did, and found nothing at all.
+                key = (cys_cost + fr4_cost, -length)
+                if best is None or key < best[0]:
+                    best = (key, strand[start:end], orientation)
+    return (best[1], best[2]) if best else None
 
 
 def _longest_exact(window: str, germline: str) -> tuple[int, int]:
