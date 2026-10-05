@@ -31,8 +31,16 @@ distribution, not filled from the shortest lengths upward. A first version
 walked lengths from 15 and stopped on reaching the cap, which loaded the
 sample with short junctions: no_call came out at 67.6% against 44.2% on an
 unbiased thousand, because a short joint has less room to hold a D remnant
-in the first place. The length histogram is now read first, by one facet
-call, and each length contributes in proportion to its real abundance.
+in the first place.
+
+The length histogram is read first by one facet call and each length band
+contributes in proportion to its real abundance. Bands rather than single
+lengths because one request per length is around ninety requests per
+repertoire and dominates the run at 70 s each; twelve bands of roughly equal
+weight cost about ten. Within a band the API's own ordering decides, which
+carries a small residual bias - over the whole length range that ordering
+runs about 2 nt short of the true distribution (Kolmogorov-Smirnov D=0.084,
+p=2e-6), so inside a narrow band it is far smaller, but it is not zero.
 """
 
 from __future__ import annotations
@@ -57,6 +65,7 @@ MAX_JUNCTION = 150
 PAGE = 1000
 TIMEOUT = 300
 RETRIES = 4
+BANDS = 12
 
 
 def adc_post(body: dict) -> dict | None:
@@ -89,6 +98,22 @@ def length_histogram(repertoire_id: str) -> dict[int, int] | None:
             if row.get("junction_length") is not None}
 
 
+def _bands(histogram: dict[int, int], count: int) -> list[list[int]]:
+    """Split the lengths into `count` consecutive bands of similar weight."""
+    lengths = sorted(histogram)
+    total = sum(histogram.values())
+    target = total / count
+    bands: list[list[int]] = [[]]
+    running = 0
+    for length in lengths:
+        bands[-1].append(length)
+        running += histogram[length]
+        if running >= target and len(bands) < count:
+            bands.append([])
+            running = 0
+    return [b for b in bands if b]
+
+
 def fetch_out_of_frame(repertoire_id: str, cap: int) -> tuple[list[str], bool]:
     """Junctions of out-of-frame rearrangements, deduplicated, up to `cap`.
 
@@ -103,18 +128,20 @@ def fetch_out_of_frame(repertoire_id: str, cap: int) -> tuple[list[str], bool]:
     if not histogram:
         return [], False
     total = sum(histogram.values())
-    quota = {length: max(1, round(cap * n / total)) for length, n in histogram.items()}
+    bands = _bands(histogram, BANDS)
+    quota = {tuple(band): max(1, round(cap * sum(histogram[x] for x in band) / total))
+             for band in bands}
 
     seen: set[str] = set()
     complete = True
-    for length, want in sorted(quota.items(), key=lambda kv: -kv[1]):
+    for band, want in quota.items():
         taken = 0
         offset = 0
         while taken < want:
             body = {"filters": {"op": "and", "content": [
                         {"op": "=", "content": {"field": "repertoire_id", "value": repertoire_id}},
                         {"op": "=", "content": {"field": "productive", "value": False}},
-                        {"op": "=", "content": {"field": "junction_length", "value": length}}]},
+                        {"op": "in", "content": {"field": "junction_length", "value": list(band)}}]},
                     "fields": ["junction"], "size": PAGE, "from": offset}
             out = adc_post(body)
             if out is None:
