@@ -68,3 +68,10 @@ kanıtlanmaz, sadece motive edilebilir.
 Ayrıca: bir kişinin genotipinde bir D geni için hiç alel çağrısı yoksa
 (gerçek bir yapısal delesyon olabilir), o kişi o gen için skorlamaya dahil
 edilmiyor (NaN olarak atlanıyor, sıfır veya ortalama değer atanmıyor).
+
+## Yeni yön (2026-10): fare enfeksiyon verisi, non-productive IGH, IGoR
+
+Singhania ve ark. 2019 fare tam kan RNA-seq verisinden non-productive IGH ayıklayıp IGoR ile
+enfeksiyon öncesi/sonrası V(D)J istatistiğini karşılaştırma fikrinin fizibilite değerlendirmesi ve
+literatür taraması: [`docs/Yeni_Yaklasim_Fizibilite_ve_Literatur.md`](docs/Yeni_Yaklasim_Fizibilite_ve_Literatur.md).
+Değerlendirmeyi destekleyen pilot ölçümün kodu ve tabloları: [`pilot_igh_yield/`](pilot_igh_yield/).

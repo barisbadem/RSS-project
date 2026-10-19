@@ -1,0 +1,32 @@
+# calibration: 10 pilot libraries, slope = 0.00643 IGH contigs per M pairs per CPM of IGH_C, mean slice = 7.8 M pairs, anchored out-of-frame fraction = 31/1113 = 0.028
+model	condition	n_mice	contigs_per_mouse_low	contigs_per_mouse_high	np_per_mouse_low	np_per_mouse_high	np_arm_total_low	np_arm_total_high
+Bps_acute	Control	8	593	1670	16.5	46.5	132	372
+Bps_acute	Disease	8	145	406	4.0	11.3	32	90
+Bps_chronic	Control	16	658	1894	18.3	52.8	293	844
+Bps_chronic	Disease	16	270	780	7.5	21.7	120	348
+Candida	Control	10	199	596	5.5	16.6	55	166
+Candida	Disease	6	38	88	1.0	2.5	6	15
+HDM	Control	10	502	1735	14.0	48.3	140	483
+HDM	Disease	10	545	1462	15.2	40.7	152	407
+Influenza	Control	10	502	1604	14.0	44.7	140	447
+Influenza	Disease	8	532	1432	14.8	39.9	119	319
+Listeria	Control	10	533	1634	14.8	45.5	148	455
+Listeria	Disease	10	137	428	3.8	11.9	38	119
+MCMV	Control	10	503	1524	14.0	42.4	140	424
+MCMV	Disease	10	185	558	5.1	15.5	51	155
+Malaria	Control	12	245	719	6.8	20.0	82	240
+Malaria	Disease	13	126	383	3.5	10.7	45	139
+RSV	Control	10	530	1498	14.8	41.7	148	417
+RSV	Disease	10	447	1325	12.4	36.9	124	369
+Toxo_Crick_Ifnar-/-	Control	3	255	452	7.1	12.6	21	38
+Toxo_Crick_Ifnar-/-	Disease	5	12	24	0.3	0.7	2	3
+Toxo_Crick_Ifnar-/- x Ifngr-/-	Control	3	292	514	8.1	14.3	24	43
+Toxo_Crick_Ifnar-/- x Ifngr-/-	Disease	4	41	79	1.2	2.2	5	9
+Toxo_Crick_Ifngr-/-	Control	3	202	338	5.6	9.4	17	28
+Toxo_Crick_Ifngr-/-	Disease	5	54	105	1.5	2.9	7	15
+Toxo_Crick_WT	Control	3	197	362	5.5	10.1	16	30
+Toxo_Crick_WT	Disease	5	13	24	0.4	0.7	2	3
+Toxoplasma	Control	10	541	1518	15.1	42.3	151	423
+Toxoplasma	Disease	7	98	260	2.7	7.2	19	51
+ALL_MODELS_POOLED	Control	118			12.8	37.4	1508	4411
+ALL_MODELS_POOLED	Disease	117			6.2	17.5	724	2042

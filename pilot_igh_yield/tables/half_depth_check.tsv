@@ -1,0 +1,5 @@
+run	pairs_used	IGH_contigs	IGH_contigs_ge2reads	np_anchored	depth
+SRR7821637	3650000	142	58	4	half slice
+SRR7821637	7302992	203	119	3	full slice
+SRR7821541	4380000	66	27	2	half slice
+SRR7821541	8765605	118	58	3	full slice

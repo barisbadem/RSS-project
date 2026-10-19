@@ -1,0 +1,11 @@
+cell subset       cohort          strain         mice reps  productive/rep     OOF>=15nt/rep (min-median-max)  OOF total
+naive B cell      HBsAg           C57BL/6J          5    6       1,748,098     46,509     76,438    105,403    464,208
+naive B cell      HP-HEL          C57BL/6J          5    7       1,682,319     49,599     72,861    118,639    552,284
+naive B cell      OVA             C57BL/6J          5    6       1,730,474     55,873     70,418     85,324    430,645
+naive B cell      balb/c control  Balb/c            4    4       2,574,710     62,858    103,250    116,565    385,922
+naive B cell      control         C57BL/6J          5    5       2,825,718     53,447    139,463    279,953    678,768
+naive B cell      pet shop        pet shop mouse    3    3         373,207     11,922     20,718     23,946     56,586
+precursor B cell  HBsAg           C57BL/6J          4    4         957,128     26,177     67,710     74,547    236,144
+precursor B cell  HP-HEL          C57BL/6J          5    5         935,592     60,658     71,877     89,175    362,157
+precursor B cell  OVA             C57BL/6J          5    6       1,084,496     63,723     68,675    102,444    444,085
+precursor B cell  control         C57BL/6J          5    5         995,582     44,420     55,762     78,130    284,158

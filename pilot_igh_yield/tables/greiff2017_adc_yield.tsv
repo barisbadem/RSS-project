@@ -1,0 +1,52 @@
+cell_subset	cohort	subject	strain	productive	non_productive_raw	out_of_frame_ge15nt
+naive B cell	HBsAg	HBsAg mouse 1	C57BL/6J	1771417	302417	81312
+naive B cell	HBsAg	HBsAg mouse 2	C57BL/6J	2528057	524339	102731
+naive B cell	HBsAg	HBsAg mouse 3	C57BL/6J	2457490	508522	105403
+naive B cell	HBsAg	HBsAg mouse 4	C57BL/6J	1642340	299626	71564
+naive B cell	HBsAg	HBsAg mouse 5	C57BL/6J	1724779	1249477	56689
+naive B cell	HBsAg	HBsAg mouse 5	C57BL/6J	1488139	1264907	46509
+naive B cell	HP-HEL	HP-HEL mouse 1	C57BL/6J	1447644	1275177	49599
+naive B cell	HP-HEL	HP-HEL mouse 1	C57BL/6J	2033171	403779	102558
+naive B cell	HP-HEL	HP-HEL mouse 1	C57BL/6J	1647742	1671928	58469
+naive B cell	HP-HEL	HP-HEL mouse 2	C57BL/6J	1515141	342474	86675
+naive B cell	HP-HEL	HP-HEL mouse 3	C57BL/6J	1700921	312248	72861
+naive B cell	HP-HEL	HP-HEL mouse 4	C57BL/6J	1682319	294800	63483
+naive B cell	HP-HEL	HP-HEL mouse 5	C57BL/6J	2219004	402111	118639
+naive B cell	OVA	OVA mouse 1	C57BL/6J	1553948	301016	55873
+naive B cell	OVA	OVA mouse 2	C57BL/6J	1469078	340254	64171
+naive B cell	OVA	OVA mouse 2	C57BL/6J	1518123	350286	64356
+naive B cell	OVA	OVA mouse 3	C57BL/6J	1907001	383001	76480
+naive B cell	OVA	OVA mouse 4	C57BL/6J	2526231	445476	85324
+naive B cell	OVA	OVA mouse 5	C57BL/6J	2439883	459882	84441
+naive B cell	balb/c control	Balb/c mouse 1	Balb/c	2952054	488635	116565
+naive B cell	balb/c control	Balb/c mouse 2	Balb/c	2518170	391644	98069
+naive B cell	balb/c control	Balb/c mouse 3	Balb/c	2631251	390946	108430
+naive B cell	balb/c control	Balb/c mouse 4	Balb/c	1610913	209136	62858
+naive B cell	control	C57BL/6 mouse 1	C57BL/6J	1695168	312516	64900
+naive B cell	control	C57BL/6 mouse 2	C57BL/6J	4785070	1020933	141005
+naive B cell	control	C57BL/6 mouse 3	C57BL/6J	1842424	340968	53447
+naive B cell	control	C57BL/6 mouse 4	C57BL/6J	2825718	757672	139463
+naive B cell	control	C57BL/6 mouse 5	C57BL/6J	6648986	2160404	279953
+naive B cell	pet shop	pet shop mouse 1	pet shop mouse	397468	56583	23946
+naive B cell	pet shop	pet shop mouse 2	pet shop mouse	373207	49764	20718
+naive B cell	pet shop	pet shop mouse 3	pet shop mouse	372194	38554	11922
+precursor B cell	HBsAg	HBsAg mouse 1	C57BL/6J	885333	222842	67378
+precursor B cell	HBsAg	HBsAg mouse 2	C57BL/6J	1031798	256382	68042
+precursor B cell	HBsAg	HBsAg mouse 3	C57BL/6J	1028923	249064	74547
+precursor B cell	HBsAg	HBsAg mouse 4	C57BL/6J	369321	69155	26177
+precursor B cell	HP-HEL	HP-HEL mouse 1	C57BL/6J	935592	221431	60658
+precursor B cell	HP-HEL	HP-HEL mouse 2	C57BL/6J	926139	226732	71877
+precursor B cell	HP-HEL	HP-HEL mouse 3	C57BL/6J	802232	188960	62494
+precursor B cell	HP-HEL	HP-HEL mouse 4	C57BL/6J	1115250	241664	77953
+precursor B cell	HP-HEL	HP-HEL mouse 5	C57BL/6J	1262067	284155	89175
+precursor B cell	OVA	OVA mouse 1	C57BL/6J	903213	225745	63723
+precursor B cell	OVA	OVA mouse 2	C57BL/6J	1409899	361968	102444
+precursor B cell	OVA	OVA mouse 2	C57BL/6J	929784	218905	67515
+precursor B cell	OVA	OVA mouse 3	C57BL/6J	1107343	245225	69835
+precursor B cell	OVA	OVA mouse 4	C57BL/6J	1061649	263111	75838
+precursor B cell	OVA	OVA mouse 5	C57BL/6J	1118960	237732	64730
+precursor B cell	control	C57BL/6 mouse 1	C57BL/6J	951537	196365	49484
+precursor B cell	control	C57BL/6 mouse 2	C57BL/6J	1154147	260079	56362
+precursor B cell	control	C57BL/6 mouse 3	C57BL/6J	1092858	257852	44420
+precursor B cell	control	C57BL/6 mouse 4	C57BL/6J	995582	365119	78130
+precursor B cell	control	C57BL/6 mouse 5	C57BL/6J	773594	268226	55762

@@ -1,0 +1,28 @@
+model	n_ctrl	n_dis	IGH_C_CPM_ctrl	IGH_C_CPM_dis	ratio_dis/ctrl	MWU_p	Cd79a_ratio	Jchain_ratio	Igkc_ratio
+Bps_acute	8	8	4262	725	0.17	0.0002	0.14	0.91	0.21
+Bps_chronic	16	16	4402	1770	0.40	0.0000	0.36	0.76	0.37
+Candida	10	6	1471	215	0.15	0.0030	0.17	0.50	0.15
+HDM	10	10	3920	5399	1.38	0.0004	1.35	0.73	1.40
+Influenza	10	8	3354	3650	1.09	0.2031	0.94	3.34	1.11
+Listeria	10	10	3423	894	0.26	0.0002	0.14	0.29	0.18
+MCMV	10	10	3409	1360	0.40	0.0002	0.29	1.08	0.40
+Malaria	12	13	1814	854	0.47	0.0007	0.34	0.75	0.43
+RSV	10	10	3988	3016	0.76	0.0010	0.76	1.02	0.82
+Toxo_Crick_Ifnar-/-	3	5	2602	121	0.05	0.0357	0.02	0.09	0.03
+Toxo_Crick_Ifnar-/- x Ifngr-/-	3	4	3325	332	0.10	0.0571	0.06	0.12	0.05
+Toxo_Crick_Ifngr-/-	3	5	2300	531	0.23	0.0357	0.16	0.45	0.22
+Toxo_Crick_WT	3	5	2294	137	0.06	0.0357	0.02	0.18	0.04
+Toxoplasma	10	7	3807	743	0.20	0.0001	0.13	0.52	0.23
+ALL	118	117	3578	1089	0.30	-	-	-	-
+
+# calibration, n=10: Spearman rho(IGH_C CPM, TRUST4 IGH contigs per M pairs) = 0.87, p = 0.0012
+# SRR7821647	Toxoplasma_Disease_whole blood	IGH_C_CPM=438	contigs_per_M_pairs=2.3
+# SRR7821646	Toxoplasma_Disease_whole blood	IGH_C_CPM=724	contigs_per_M_pairs=4.5
+# SRR7821545	Malaria_Disease_whole blood	IGH_C_CPM=836	contigs_per_M_pairs=4.4
+# SRR7821555	Malaria_Disease_whole blood	IGH_C_CPM=1005	contigs_per_M_pairs=6.4
+# SRR7821542	Malaria_Control_whole blood	IGH_C_CPM=1081	contigs_per_M_pairs=4.0
+# SRR7821541	Malaria_Control_whole blood	IGH_C_CPM=2082	contigs_per_M_pairs=13.5
+# SRR7821659	Influenza_Control_whole blood	IGH_C_CPM=3578	contigs_per_M_pairs=17.3
+# SRR7821668	Influenza_Disease_whole blood	IGH_C_CPM=3714	contigs_per_M_pairs=33.8
+# SRR7821644	Toxoplasma_Control_whole blood	IGH_C_CPM=3930	contigs_per_M_pairs=31.5
+# SRR7821637	Toxoplasma_Control_whole blood	IGH_C_CPM=5386	contigs_per_M_pairs=27.8
